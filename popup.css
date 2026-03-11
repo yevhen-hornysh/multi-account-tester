@@ -1,0 +1,47 @@
+/* Basic popup layout for the initial extension scaffold. */
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  background: #f4f6f8;
+  color: #1f2933;
+}
+
+.popup {
+  width: 320px;
+  padding: 16px;
+  box-sizing: border-box;
+}
+
+.popup__header {
+  margin-bottom: 16px;
+}
+
+.popup__header h1 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.3;
+}
+
+.panel {
+  margin-bottom: 12px;
+  padding: 12px;
+  background: #ffffff;
+  border: 1px solid #d9e2ec;
+  border-radius: 8px;
+}
+
+.panel:last-child {
+  margin-bottom: 0;
+}
+
+.panel h2 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.panel__content {
+  min-height: 40px;
+  border: 1px dashed #bcccdc;
+  border-radius: 6px;
+  background: #f8fafc;
+}

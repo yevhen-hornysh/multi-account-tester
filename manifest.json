@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "Multi-Account Tester",
+  "version": "0.1.0",
+  "description": "A minimal Chrome extension skeleton for testing multiple account profiles.",
+  "permissions": [
+    "cookies",
+    "storage",
+    "scripting",
+    "activeTab",
+    "tabs"
+  ],
+  "action": {
+    "default_title": "Multi-Account Tester",
+    "default_popup": "popup.html"
+  }
+}
