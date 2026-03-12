@@ -10,6 +10,9 @@ document.addEventListener("DOMContentLoaded", () => {
   const PROFILE_NAME_REQUIRED_MESSAGE = "Profile name is required.";
   const DOMAIN_REQUIRED_MESSAGE = "Domain is required.";
   const INVALID_DOMAIN_MESSAGE = "Enter a valid domain.";
+  const UNSUPPORTED_PAGE_MESSAGE = "Open an http:// or https:// page to use this extension.";
+  const DOMAIN_CONTEXT_MISMATCH_MESSAGE =
+    "The entered domain must match the current site or one of its parent domains.";
 
   let statusTimeoutId;
   let currentProfiles = [];
@@ -105,11 +108,35 @@ document.addEventListener("DOMContentLoaded", () => {
       throw new Error(DOMAIN_REQUIRED_MESSAGE);
     }
 
-    const valueWithoutProtocol = trimmedValue.replace(/^[a-z]+:\/\//i, "");
-    const hostWithOptionalPath = valueWithoutProtocol.split("/")[0];
-    const normalizedHost = hostWithOptionalPath.replace(/^\.+/, "").replace(/^www\./, "");
+    const candidateValue = /^[a-z]+:\/\//i.test(trimmedValue)
+      ? trimmedValue
+      : `https://${trimmedValue.replace(/^\/+/, "")}`;
 
-    if (!normalizedHost) {
+    let normalizedHost = "";
+
+    try {
+      normalizedHost = new URL(candidateValue).hostname.toLowerCase();
+    } catch (error) {
+      throw new Error(INVALID_DOMAIN_MESSAGE);
+    }
+
+    normalizedHost = normalizedHost.replace(/^\.+/, "").replace(/\.+$/, "");
+
+    if (
+      !normalizedHost ||
+      normalizedHost.length > 253 ||
+      normalizedHost.includes("..") ||
+      !/^[a-z0-9.-]+$/.test(normalizedHost)
+    ) {
+      throw new Error(INVALID_DOMAIN_MESSAGE);
+    }
+
+    const labels = normalizedHost.split(".");
+    const hasInvalidLabel = labels.some((label) => {
+      return !label || label.length > 63 || label.startsWith("-") || label.endsWith("-");
+    });
+
+    if (hasInvalidLabel) {
       throw new Error(INVALID_DOMAIN_MESSAGE);
     }
 
@@ -173,12 +200,20 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       const parsedUrl = new URL(activeTab.url);
 
+      if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+        throw new Error(UNSUPPORTED_PAGE_MESSAGE);
+      }
+
       return {
         url: activeTab.url,
         origin: parsedUrl.origin,
-        hostname: parsedUrl.hostname.toLowerCase()
+        hostname: normalizeCookieDomain(parsedUrl.hostname)
       };
     } catch (error) {
+      if (error instanceof Error && error.message === UNSUPPORTED_PAGE_MESSAGE) {
+        throw error;
+      }
+
       throw new Error("The active tab does not have a readable URL.");
     }
   }
@@ -206,8 +241,16 @@ document.addEventListener("DOMContentLoaded", () => {
 
     return (
       normalizedSavedDomain === normalizedActiveHostname ||
-      normalizedActiveHostname.endsWith(`.${normalizedSavedDomain}`) ||
-      normalizedSavedDomain.endsWith(`.${normalizedActiveHostname}`)
+      normalizedActiveHostname.endsWith(`.${normalizedSavedDomain}`)
+    );
+  }
+
+  function profileHasStoredLocalStorage(profile) {
+    return Boolean(
+      profile &&
+        profile.localStorage &&
+        typeof profile.localStorage === "object" &&
+        Object.keys(profile.localStorage).length > 0
     );
   }
 
@@ -219,6 +262,19 @@ document.addEventListener("DOMContentLoaded", () => {
       return {
         canActivate: false,
         message: `Domain mismatch: saved for ${profile.domain}, active tab is ${activeTabContext.hostname}.`,
+        type: "error"
+      };
+    }
+
+    if (
+      profileHasStoredLocalStorage(profile) &&
+      typeof profile.activeTabOrigin === "string" &&
+      profile.activeTabOrigin &&
+      profile.activeTabOrigin !== activeTabContext.origin
+    ) {
+      return {
+        canActivate: false,
+        message: `Origin mismatch: saved for ${profile.activeTabOrigin}, active tab is ${activeTabContext.origin}.`,
         type: "error"
       };
     }
@@ -720,7 +776,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (
       error.message === DOMAIN_REQUIRED_MESSAGE ||
-      error.message === INVALID_DOMAIN_MESSAGE
+      error.message === INVALID_DOMAIN_MESSAGE ||
+      error.message === DOMAIN_CONTEXT_MISMATCH_MESSAGE
     ) {
       domainInput.focus();
     }
@@ -736,9 +793,14 @@ document.addEventListener("DOMContentLoaded", () => {
 
     try {
       const profileName = validateProfileName(profileNameInput.value);
-      const normalizedDomain = normalizeCookieDomain(domainInput.value);
       const activeTab = await getCurrentActiveTab();
       const activeTabContext = getActiveTabUrlContext(activeTab);
+      const normalizedDomain = normalizeCookieDomain(domainInput.value);
+
+      if (!domainsMatch(normalizedDomain, activeTabContext.hostname)) {
+        throw new Error(DOMAIN_CONTEXT_MISMATCH_MESSAGE);
+      }
+
       const { cookies } = await readCookiesForDomain(normalizedDomain);
       const localStorageEntries = await readLocalStorageFromActiveTab();
       const profiles = await readProfilesFromStorage();
@@ -768,7 +830,7 @@ document.addEventListener("DOMContentLoaded", () => {
     } catch (error) {
       console.error("Failed to save session", error);
       focusFieldForSaveError(error);
-      showStatus("Failed to save session", "error");
+      showStatus(error instanceof Error ? error.message : "Failed to save session", "error");
     } finally {
       setBusyState(null);
     }
@@ -783,7 +845,10 @@ document.addEventListener("DOMContentLoaded", () => {
       await fillDomainFromCurrentSite({ showFeedback: true });
     } catch (error) {
       console.error("Failed to use current site", error);
-      showStatus("Could not read the current site domain.", "error");
+      showStatus(
+        error instanceof Error ? error.message : "Could not read the current site domain.",
+        "error"
+      );
     }
   });
 
