@@ -10,6 +10,9 @@
     "activeTab",
     "tabs"
   ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
   "action": {
     "default_title": "Multi-Account Tester",
     "default_popup": "popup.html"
