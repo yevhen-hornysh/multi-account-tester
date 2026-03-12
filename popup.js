@@ -45,6 +45,16 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  function validateProfileName(input) {
+    const trimmedValue = input.trim();
+
+    if (!trimmedValue) {
+      throw new Error("Profile name is required.");
+    }
+
+    return trimmedValue;
+  }
+
   function normalizeCookieDomain(input) {
     const trimmedValue = input.trim().toLowerCase();
 
@@ -247,87 +257,80 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  /**
+   * Saved profile shape stored in chrome.storage.local under the "profiles" key.
+   * {
+   *   id: string,
+   *   profileName: string,
+   *   domain: string,
+   *   savedAt: string,
+   *   cookies: chrome.cookies.Cookie[],
+   *   localStorage: Record<string, string | null>,
+   *   activeTabUrl: string,
+   *   activeTabOrigin: string
+   * }
+   */
+  function createProfile({
+    profileName,
+    domain,
+    cookies,
+    localStorageEntries,
+    activeTabUrl,
+    activeTabOrigin
+  }) {
+    return {
+      id: crypto.randomUUID(),
+      profileName,
+      domain,
+      savedAt: new Date().toISOString(),
+      cookies,
+      localStorage: localStorageEntries,
+      activeTabUrl,
+      activeTabOrigin
+    };
+  }
+
   saveSessionButton.addEventListener("click", async () => {
-    const profileName = profileNameInput.value.trim();
-    const domain = domainInput.value.trim();
-
-    if (!profileName) {
-      showStatus("Profile name is required.", "error");
-      profileNameInput.focus();
-      return;
-    }
-
-    if (!domain) {
-      showStatus("Domain is required.", "error");
-      domainInput.focus();
-      return;
-    }
-
     try {
+      const profileName = validateProfileName(profileNameInput.value);
+      const normalizedDomain = normalizeCookieDomain(domainInput.value);
+      const activeTab = await getActiveTab();
+      const activeTabOrigin = new URL(activeTab.url).origin;
+      const { cookies } = await readCookiesForDomain(normalizedDomain);
+      const localStorageEntries = await readLocalStorageFromActiveTab();
       const profiles = await loadProfiles();
-      const nextProfile = {
-        id: crypto.randomUUID(),
+      const nextProfile = createProfile({
         profileName,
-        domain,
-        savedAt: new Date().toISOString()
-      };
+        domain: normalizedDomain,
+        cookies,
+        localStorageEntries,
+        activeTabUrl: activeTab.url,
+        activeTabOrigin
+      });
 
       profiles.unshift(nextProfile);
       await saveProfiles(profiles);
       renderProfiles(profiles);
-
-      let cookies = [];
-      let localStorageEntries = null;
-      let cookieReadFailed = false;
-      let localStorageReadFailed = false;
-
-      try {
-        const { normalizedDomain, cookies: readCookies } = await readCookiesForDomain(domain);
-        cookies = readCookies;
-        console.log(`Cookies for ${normalizedDomain}`, cookies);
-      } catch (cookieError) {
-        cookieReadFailed = true;
-        console.error("Failed to read cookies for domain", domain, cookieError);
-      }
-
-      try {
-        localStorageEntries = await readLocalStorageFromActiveTab();
-        console.log("localStorage for active tab", localStorageEntries);
-      } catch (localStorageError) {
-        localStorageReadFailed = true;
-        console.error("Failed to read localStorage from active tab", localStorageError);
-      }
-
-      if (cookieReadFailed && localStorageReadFailed) {
-        showStatus(
-          `Saved profile "${nextProfile.profileName}", but cookie and localStorage reads failed.`,
-          "error"
-        );
-      } else if (cookieReadFailed) {
-        const localStorageCount = Object.keys(localStorageEntries || {}).length;
-        showStatus(
-          `Saved profile "${nextProfile.profileName}", but cookie lookup failed. Read ${localStorageCount} localStorage entries.`,
-          "error"
-        );
-      } else if (localStorageReadFailed) {
-        showStatus(
-          `Saved profile "${nextProfile.profileName}". Found ${cookies.length} cookies, but localStorage read failed.`,
-          "error"
-        );
-      } else {
-        const localStorageCount = Object.keys(localStorageEntries || {}).length;
-        showStatus(
-          `Saved profile "${nextProfile.profileName}". Found ${cookies.length} cookies. Read ${localStorageCount} localStorage entries.`,
-          "success"
-        );
-      }
+      showStatus("Session saved successfully", "success");
 
       profileNameInput.value = "";
       domainInput.value = "";
       profileNameInput.focus();
     } catch (error) {
-      console.error("Failed to save profile metadata", error);
-      showStatus("Failed to save profile.", "error");
+      console.error("Failed to save session", error);
+
+      if (error && error.message === "Profile name is required.") {
+        profileNameInput.focus();
+      }
+
+      if (
+        error &&
+        (error.message === "Domain is required." || error.message === "Enter a valid domain.")
+      ) {
+        domainInput.focus();
+      }
+
+      showStatus("Failed to save session", "error");
     }
   });
 
