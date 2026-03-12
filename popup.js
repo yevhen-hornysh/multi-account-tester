@@ -170,7 +170,9 @@ document.addEventListener("DOMContentLoaded", () => {
     return {
       canActivate: true,
       message: `Validation passed for ${profile.profileName}. Activation can proceed.`,
-      type: "success"
+      type: "success",
+      activeTab,
+      activeTabContext
     };
   }
 
@@ -307,6 +309,56 @@ document.addEventListener("DOMContentLoaded", () => {
     };
   }
 
+  function writeLocalStorageEntries(savedEntries) {
+    const entries = savedEntries && typeof savedEntries === "object" ? savedEntries : {};
+    const keys = Object.keys(entries);
+
+    // localStorage is origin-specific, so this only affects the active tab's current origin.
+    window.localStorage.clear();
+
+    keys.forEach((key) => {
+      const value = entries[key];
+      window.localStorage.setItem(key, value === null ? "null" : String(value));
+    });
+
+    return {
+      cleared: true,
+      restored: keys.length
+    };
+  }
+
+  async function restoreProfileLocalStorage(profile, activeTab) {
+    if (!activeTab || typeof activeTab.id !== "number") {
+      throw new Error("No active tab found.");
+    }
+
+    const savedLocalStorage =
+      profile.localStorage && typeof profile.localStorage === "object" ? profile.localStorage : {};
+
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: activeTab.id },
+        func: writeLocalStorageEntries,
+        args: [savedLocalStorage]
+      });
+
+      const [result] = Array.isArray(results) ? results : [];
+
+      if (!result || !result.result || typeof result.result !== "object") {
+        return {
+          cleared: false,
+          restored: 0
+        };
+      }
+
+      return result.result;
+    } catch (error) {
+      throw new Error(
+        error && error.message ? error.message : "Failed to restore localStorage in the active tab."
+      );
+    }
+  }
+
   function collectLocalStorageEntries() {
     const entries = {};
 
@@ -407,18 +459,19 @@ document.addEventListener("DOMContentLoaded", () => {
           }
 
           const restoreSummary = await restoreProfileCookies(profile);
+          const localStorageSummary = await restoreProfileLocalStorage(profile, validation.activeTab);
 
           if (restoreSummary.failed > 0) {
             console.error("Some cookies failed to restore", restoreSummary.failures);
             showStatus(
-              `Restored ${restoreSummary.restored} of ${restoreSummary.total} cookies`,
+              `Restored ${restoreSummary.restored}/${restoreSummary.total} cookies and ${localStorageSummary.restored} localStorage entries`,
               "error"
             );
             return;
           }
 
           showStatus(
-            `Restored ${restoreSummary.restored} of ${restoreSummary.total} cookies`,
+            `Restored ${restoreSummary.restored}/${restoreSummary.total} cookies and ${localStorageSummary.restored} localStorage entries`,
             "success"
           );
         } catch (error) {
@@ -485,7 +538,7 @@ document.addEventListener("DOMContentLoaded", () => {
    *   domain: string,
    *   savedAt: string,
    *   cookies: chrome.cookies.Cookie[],
-   *   localStorage: Record<string, string | null>,
+   *   localStorage: Record<string, string | null>, // origin-specific data for the saved tab origin
    *   activeTabUrl: string,
    *   activeTabOrigin: string
    * }
