@@ -174,6 +174,139 @@ document.addEventListener("DOMContentLoaded", () => {
     };
   }
 
+  function buildCookieUrl(cookie, fallbackHostname) {
+    const normalizedFallbackHost = normalizeCookieDomain(fallbackHostname);
+    const cookieDomain =
+      typeof cookie.domain === "string" && cookie.domain.trim()
+        ? cookie.domain.replace(/^\.+/, "")
+        : normalizedFallbackHost;
+    const protocol = cookie.secure ? "https:" : "http:";
+    const path = typeof cookie.path === "string" && cookie.path ? cookie.path : "/";
+
+    return `${protocol}//${cookieDomain}${path}`;
+  }
+
+  function removeCookie(cookie, fallbackHostname) {
+    return new Promise((resolve) => {
+      chrome.cookies.remove(
+        {
+          url: buildCookieUrl(cookie, fallbackHostname),
+          name: cookie.name,
+          storeId: cookie.storeId
+        },
+        (details) => {
+          if (chrome.runtime.lastError) {
+            resolve({
+              removed: false,
+              error: new Error(chrome.runtime.lastError.message)
+            });
+            return;
+          }
+
+          resolve({
+            removed: Boolean(details)
+          });
+        }
+      );
+    });
+  }
+
+  async function clearCookiesForProfileDomain(profileDomain) {
+    const { normalizedDomain, cookies } = await readCookiesForDomain(profileDomain);
+    const removalResults = await Promise.all(
+      cookies.map((cookie) => removeCookie(cookie, normalizedDomain))
+    );
+
+    return {
+      attempted: cookies.length,
+      removed: removalResults.filter((result) => result.removed).length,
+      failed: removalResults.filter((result) => result.error).length
+    };
+  }
+
+  function restoreCookie(cookie, fallbackHostname) {
+    return new Promise((resolve) => {
+      const details = {
+        url: buildCookieUrl(cookie, fallbackHostname),
+        name: cookie.name,
+        value: typeof cookie.value === "string" ? cookie.value : "",
+        path: typeof cookie.path === "string" && cookie.path ? cookie.path : "/",
+        secure: Boolean(cookie.secure),
+        httpOnly: Boolean(cookie.httpOnly)
+      };
+
+      if (typeof cookie.domain === "string" && cookie.domain.trim()) {
+        details.domain = cookie.domain;
+      }
+
+      if (typeof cookie.sameSite === "string" && cookie.sameSite) {
+        details.sameSite = cookie.sameSite;
+      }
+
+      if (typeof cookie.expirationDate === "number") {
+        details.expirationDate = cookie.expirationDate;
+      }
+
+      if (typeof cookie.storeId === "string" && cookie.storeId) {
+        details.storeId = cookie.storeId;
+      }
+
+      chrome.cookies.set(details, (createdCookie) => {
+        if (chrome.runtime.lastError) {
+          resolve({
+            restored: false,
+            error: new Error(chrome.runtime.lastError.message)
+          });
+          return;
+        }
+
+        if (!createdCookie) {
+          resolve({
+            restored: false,
+            error: new Error(`Chrome did not return a cookie for ${cookie.name}.`)
+          });
+          return;
+        }
+
+        resolve({ restored: true });
+      });
+    });
+  }
+
+  async function restoreProfileCookies(profile) {
+    const normalizedDomain = normalizeCookieDomain(profile.domain);
+    const savedCookies = Array.isArray(profile.cookies) ? profile.cookies : [];
+
+    await clearCookiesForProfileDomain(normalizedDomain);
+
+    if (!savedCookies.length) {
+      return {
+        total: 0,
+        restored: 0,
+        failed: 0,
+        failures: []
+      };
+    }
+
+    const restoreResults = await Promise.all(
+      savedCookies.map((cookie) => restoreCookie(cookie, normalizedDomain))
+    );
+    const failures = restoreResults
+      .map((result, index) => ({ result, cookie: savedCookies[index] }))
+      .filter(({ result }) => !result.restored)
+      .map(({ result, cookie }) => ({
+        cookieName: cookie.name,
+        message: result.error ? result.error.message : "Unknown cookie restore error."
+      }));
+
+    return {
+      total: savedCookies.length,
+      restored: restoreResults.filter((result) => result.restored).length,
+      failed: failures.length,
+      failures
+    };
+  }
+
   function collectLocalStorageEntries() {
     const entries = {};
 
@@ -267,9 +400,29 @@ document.addEventListener("DOMContentLoaded", () => {
       activateButton.addEventListener("click", async () => {
         try {
           const validation = await validateActivation(profile);
-          showStatus(validation.message, validation.type);
+
+          if (!validation.canActivate) {
+            showStatus(validation.message, validation.type);
+            return;
+          }
+
+          const restoreSummary = await restoreProfileCookies(profile);
+
+          if (restoreSummary.failed > 0) {
+            console.error("Some cookies failed to restore", restoreSummary.failures);
+            showStatus(
+              `Restored ${restoreSummary.restored} of ${restoreSummary.total} cookies`,
+              "error"
+            );
+            return;
+          }
+
+          showStatus(
+            `Restored ${restoreSummary.restored} of ${restoreSummary.total} cookies`,
+            "success"
+          );
         } catch (error) {
-          console.error("Activation validation failed", error);
+          console.error("Activation failed", error);
 
           if (error && error.message === "No active tab found.") {
             showStatus("No active tab found.", "error");
@@ -281,7 +434,12 @@ document.addEventListener("DOMContentLoaded", () => {
             return;
           }
 
-          showStatus("Activation validation failed.", "error");
+          if (error && error.message) {
+            showStatus(error.message, "error");
+            return;
+          }
+
+          showStatus("Cookie restore failed.", "error");
         }
       });
 
