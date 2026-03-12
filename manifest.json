@@ -2,12 +2,11 @@
   "manifest_version": 3,
   "name": "Multi-Account Tester",
   "version": "0.1.0",
-  "description": "A minimal Chrome extension skeleton for testing multiple account profiles.",
+  "description": "Save and restore cookies and localStorage for reusable test profiles.",
   "permissions": [
     "cookies",
     "storage",
     "scripting",
-    "activeTab",
     "tabs"
   ],
   "host_permissions": [
