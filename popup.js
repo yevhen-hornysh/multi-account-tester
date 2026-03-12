@@ -45,6 +45,14 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  async function deleteProfile(profileId) {
+    const profiles = await loadProfiles();
+    const nextProfiles = profiles.filter((profile) => profile.id !== profileId);
+
+    await saveProfiles(nextProfiles);
+    return nextProfiles;
+  }
+
   function formatSavedAt(savedAt) {
     return new Date(savedAt).toLocaleString();
   }
@@ -99,9 +107,15 @@ document.addEventListener("DOMContentLoaded", () => {
       deleteButton.type = "button";
       deleteButton.className = "button button--ghost";
       deleteButton.textContent = "Delete";
-      deleteButton.addEventListener("click", () => {
-        console.log("Delete profile placeholder", profile);
-        showStatus(`Delete is not implemented for "${profile.profileName}" yet.`);
+      deleteButton.addEventListener("click", async () => {
+        try {
+          const profiles = await deleteProfile(profile.id);
+          renderProfiles(profiles);
+          showStatus("Profile deleted", "success");
+        } catch (error) {
+          console.error("Failed to delete profile", error);
+          showStatus("Failed to delete profile.", "error");
+        }
       });
 
       actions.append(activateButton, deleteButton);
