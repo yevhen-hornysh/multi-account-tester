@@ -9,11 +9,11 @@
   --accent: #18c7b1;
   --accent-dark: #0f9c8b;
   --accent-soft: rgba(24, 199, 177, 0.12);
-  --info-bg: rgba(17, 181, 228, 0.1);
+  --info-bg: #eaf7fc;
   --info-text: #0d6f94;
-  --success-bg: rgba(24, 199, 177, 0.12);
+  --success-bg: #ebfaf7;
   --success-text: #0f7f72;
-  --error-bg: rgba(198, 70, 70, 0.12);
+  --error-bg: #fdf0f0;
   --error-text: #b23b3b;
   --input-border: #cfd7df;
   --shadow: 0 12px 28px rgba(36, 48, 67, 0.08);
@@ -270,12 +270,12 @@ body {
   font-weight: 600;
   line-height: 1.4;
   color: var(--text-secondary);
-  background: transparent;
+  background: #ffffff;
   opacity: 0;
   pointer-events: none;
   transform: translateY(-10px) scale(0.98);
   transition: opacity 0.16s ease, transform 0.16s ease;
-  box-shadow: 0 16px 32px rgba(36, 48, 67, 0.2);
+  box-shadow: 0 16px 32px rgba(36, 48, 67, 0.18);
 }
 
 .status-message.is-visible {
@@ -286,19 +286,19 @@ body {
 .status-message--info {
   color: var(--info-text);
   background: var(--info-bg);
-  border-color: rgba(17, 181, 228, 0.12);
+  border-color: #b8dff0;
 }
 
 .status-message--success {
   color: var(--success-text);
   background: var(--success-bg);
-  border-color: rgba(24, 199, 177, 0.14);
+  border-color: #b9e9df;
 }
 
 .status-message--error {
   color: var(--error-text);
   background: var(--error-bg);
-  border-color: rgba(198, 70, 70, 0.16);
+  border-color: #efc2c2;
 }
 
 .status-message:empty {
