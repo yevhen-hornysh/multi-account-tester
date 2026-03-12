@@ -372,6 +372,37 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  function reloadTab(tabId) {
+    return new Promise((resolve, reject) => {
+      chrome.tabs.reload(tabId, {}, () => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+
+        resolve();
+      });
+    });
+  }
+
+  async function activateProfile(profile) {
+    const validation = await validateActivation(profile);
+
+    if (!validation.canActivate) {
+      throw new Error(validation.message);
+    }
+
+    const cookieSummary = await restoreProfileCookies(profile);
+
+    if (cookieSummary.failed > 0) {
+      console.error("Some cookies failed to restore", cookieSummary.failures);
+      throw new Error("Cookie restore incomplete.");
+    }
+
+    await restoreProfileLocalStorage(profile, validation.activeTab);
+    await reloadTab(validation.activeTab.id);
+  }
+
   function collectLocalStorageEntries() {
     const entries = {};
 
@@ -464,48 +495,11 @@ document.addEventListener("DOMContentLoaded", () => {
       activateButton.textContent = "Activate";
       activateButton.addEventListener("click", async () => {
         try {
-          const validation = await validateActivation(profile);
-
-          if (!validation.canActivate) {
-            showStatus(validation.message, validation.type);
-            return;
-          }
-
-          const restoreSummary = await restoreProfileCookies(profile);
-          const localStorageSummary = await restoreProfileLocalStorage(profile, validation.activeTab);
-
-          if (restoreSummary.failed > 0) {
-            console.error("Some cookies failed to restore", restoreSummary.failures);
-            showStatus(
-              `Restored ${restoreSummary.restored}/${restoreSummary.total} cookies and ${localStorageSummary.restored} localStorage entries`,
-              "error"
-            );
-            return;
-          }
-
-          showStatus(
-            `Restored ${restoreSummary.restored}/${restoreSummary.total} cookies and ${localStorageSummary.restored} localStorage entries`,
-            "success"
-          );
+          await activateProfile(profile);
+          showStatus("Session activated successfully", "success");
         } catch (error) {
           console.error("Activation failed", error);
-
-          if (error && error.message === "No active tab found.") {
-            showStatus("No active tab found.", "error");
-            return;
-          }
-
-          if (error && error.message === "The active tab does not have a readable URL.") {
-            showStatus("The active tab does not have a readable URL.", "error");
-            return;
-          }
-
-          if (error && error.message) {
-            showStatus(error.message, "error");
-            return;
-          }
-
-          showStatus("Cookie restore failed.", "error");
+          showStatus("Failed to activate session", "error");
         }
       });
 
