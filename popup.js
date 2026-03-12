@@ -5,7 +5,11 @@ document.addEventListener("DOMContentLoaded", () => {
   const saveSessionButton = document.getElementById("saveSessionButton");
   const profilesList = document.getElementById("profilesList");
   const statusMessage = document.getElementById("statusMessage");
+
   const STORAGE_KEY = "profiles";
+  const PROFILE_NAME_REQUIRED_MESSAGE = "Profile name is required.";
+  const DOMAIN_REQUIRED_MESSAGE = "Domain is required.";
+  const INVALID_DOMAIN_MESSAGE = "Enter a valid domain.";
 
   let statusTimeoutId;
   let currentProfiles = [];
@@ -33,6 +37,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function applyBusyState() {
     const isBusy = Boolean(busyState);
+
     saveSessionButton.disabled = isBusy;
     useCurrentSiteButton.disabled = isBusy;
     saveSessionButton.textContent =
@@ -47,11 +52,19 @@ document.addEventListener("DOMContentLoaded", () => {
     applyBusyState();
   }
 
-  function loadProfiles() {
+  function getRuntimeError() {
+    return chrome.runtime.lastError
+      ? new Error(chrome.runtime.lastError.message)
+      : null;
+  }
+
+  function readProfilesFromStorage() {
     return new Promise((resolve, reject) => {
       chrome.storage.local.get([STORAGE_KEY], (result) => {
-        if (chrome.runtime.lastError) {
-          reject(chrome.runtime.lastError);
+        const runtimeError = getRuntimeError();
+
+        if (runtimeError) {
+          reject(runtimeError);
           return;
         }
 
@@ -60,11 +73,13 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  function saveProfiles(profiles) {
+  function writeProfilesToStorage(profiles) {
     return new Promise((resolve, reject) => {
       chrome.storage.local.set({ [STORAGE_KEY]: profiles }, () => {
-        if (chrome.runtime.lastError) {
-          reject(chrome.runtime.lastError);
+        const runtimeError = getRuntimeError();
+
+        if (runtimeError) {
+          reject(runtimeError);
           return;
         }
 
@@ -77,7 +92,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const trimmedValue = input.trim();
 
     if (!trimmedValue) {
-      throw new Error("Profile name is required.");
+      throw new Error(PROFILE_NAME_REQUIRED_MESSAGE);
     }
 
     return trimmedValue;
@@ -87,7 +102,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const trimmedValue = input.trim().toLowerCase();
 
     if (!trimmedValue) {
-      throw new Error("Domain is required.");
+      throw new Error(DOMAIN_REQUIRED_MESSAGE);
     }
 
     const valueWithoutProtocol = trimmedValue.replace(/^[a-z]+:\/\//i, "");
@@ -95,7 +110,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const normalizedHost = hostWithOptionalPath.replace(/^\.+/, "").replace(/^www\./, "");
 
     if (!normalizedHost) {
-      throw new Error("Enter a valid domain.");
+      throw new Error(INVALID_DOMAIN_MESSAGE);
     }
 
     return normalizedHost;
@@ -113,8 +128,10 @@ document.addEventListener("DOMContentLoaded", () => {
       }
 
       chrome.cookies.getAll({ domain: normalizedDomain }, (cookies) => {
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
+        const runtimeError = getRuntimeError();
+
+        if (runtimeError) {
+          reject(runtimeError);
           return;
         }
 
@@ -129,17 +146,14 @@ document.addEventListener("DOMContentLoaded", () => {
   function getCurrentActiveTab() {
     return new Promise((resolve, reject) => {
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
+        const runtimeError = getRuntimeError();
+
+        if (runtimeError) {
+          reject(runtimeError);
           return;
         }
 
-        if (!Array.isArray(tabs) || !tabs.length) {
-          reject(new Error("No active tab found."));
-          return;
-        }
-
-        const [activeTab] = tabs;
+        const [activeTab] = Array.isArray(tabs) ? tabs : [];
 
         if (!activeTab || typeof activeTab.id !== "number") {
           reject(new Error("No active tab found."));
@@ -190,11 +204,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const normalizedSavedDomain = normalizeCookieDomain(savedProfileDomain);
     const normalizedActiveHostname = normalizeCookieDomain(activeTabHostname);
 
-    if (normalizedSavedDomain === normalizedActiveHostname) {
-      return true;
-    }
-
     return (
+      normalizedSavedDomain === normalizedActiveHostname ||
       normalizedActiveHostname.endsWith(`.${normalizedSavedDomain}`) ||
       normalizedSavedDomain.endsWith(`.${normalizedActiveHostname}`)
     );
@@ -227,6 +238,7 @@ document.addEventListener("DOMContentLoaded", () => {
       typeof cookie.domain === "string" && cookie.domain.trim()
         ? cookie.domain.replace(/^\.+/, "")
         : normalizedFallbackHost;
+
     return cookieDomain;
   }
 
@@ -247,10 +259,12 @@ document.addEventListener("DOMContentLoaded", () => {
           storeId: cookie.storeId
         },
         (details) => {
-          if (chrome.runtime.lastError) {
+          const runtimeError = getRuntimeError();
+
+          if (runtimeError) {
             resolve({
               removed: false,
-              error: new Error(chrome.runtime.lastError.message)
+              error: runtimeError
             });
             return;
           }
@@ -294,7 +308,7 @@ document.addEventListener("DOMContentLoaded", () => {
         httpOnly: Boolean(cookie.httpOnly)
       };
 
-      // Omitting domain preserves host-only cookies so site logout can target them correctly.
+      // Keep host-only cookies host-only so login/logout logic on the site still behaves as saved.
       if (!cookie.hostOnly && typeof cookie.domain === "string" && cookie.domain.trim()) {
         details.domain = cookie.domain;
       }
@@ -312,10 +326,12 @@ document.addEventListener("DOMContentLoaded", () => {
       }
 
       chrome.cookies.set(details, (createdCookie) => {
-        if (chrome.runtime.lastError) {
+        const runtimeError = getRuntimeError();
+
+        if (runtimeError) {
           resolve({
             restored: false,
-            error: new Error(chrome.runtime.lastError.message)
+            error: runtimeError
           });
           return;
         }
@@ -371,7 +387,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const entries = savedEntries && typeof savedEntries === "object" ? savedEntries : {};
     const keys = Object.keys(entries);
 
-    // localStorage is origin-specific, so this only affects the active tab's current origin.
+    // localStorage belongs to one site origin at a time, so we clear and rebuild it for that tab.
     window.localStorage.clear();
 
     keys.forEach((key) => {
@@ -385,6 +401,36 @@ document.addEventListener("DOMContentLoaded", () => {
     };
   }
 
+  function collectLocalStorageEntries() {
+    const entries = {};
+
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const key = window.localStorage.key(index);
+
+      if (key === null) {
+        continue;
+      }
+
+      entries[key] = window.localStorage.getItem(key);
+    }
+
+    return entries;
+  }
+
+  async function executeScriptInTab(activeTabId, func, args = []) {
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: activeTabId },
+        func,
+        args
+      });
+      const [result] = Array.isArray(results) ? results : [];
+      return result && typeof result.result !== "undefined" ? result.result : null;
+    } catch (error) {
+      throw new Error(error && error.message ? error.message : "Failed to run script in the tab.");
+    }
+  }
+
   async function restoreProfileLocalStorage(profile, activeTab) {
     if (!activeTab || typeof activeTab.id !== "number") {
       throw new Error("No active tab found.");
@@ -392,36 +438,33 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const savedLocalStorage =
       profile.localStorage && typeof profile.localStorage === "object" ? profile.localStorage : {};
+    const result = await executeScriptInTab(activeTab.id, writeLocalStorageEntries, [
+      savedLocalStorage
+    ]);
 
-    try {
-      const results = await chrome.scripting.executeScript({
-        target: { tabId: activeTab.id },
-        func: writeLocalStorageEntries,
-        args: [savedLocalStorage]
-      });
-
-      const [result] = Array.isArray(results) ? results : [];
-
-      if (!result || !result.result || typeof result.result !== "object") {
-        return {
-          cleared: false,
-          restored: 0
-        };
-      }
-
-      return result.result;
-    } catch (error) {
-      throw new Error(
-        error && error.message ? error.message : "Failed to restore localStorage in the active tab."
-      );
+    if (!result || typeof result !== "object") {
+      return {
+        cleared: false,
+        restored: 0
+      };
     }
+
+    return result;
+  }
+
+  async function readLocalStorageFromActiveTab() {
+    const activeTab = await getCurrentActiveTab();
+    const result = await executeScriptInTab(activeTab.id, collectLocalStorageEntries);
+    return result && typeof result === "object" ? result : {};
   }
 
   function reloadTab(tabId) {
     return new Promise((resolve, reject) => {
       chrome.tabs.reload(tabId, {}, () => {
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
+        const runtimeError = getRuntimeError();
+
+        if (runtimeError) {
+          reject(runtimeError);
           return;
         }
 
@@ -448,48 +491,11 @@ document.addEventListener("DOMContentLoaded", () => {
     await reloadTab(validation.activeTab.id);
   }
 
-  function collectLocalStorageEntries() {
-    const entries = {};
-
-    for (let index = 0; index < window.localStorage.length; index += 1) {
-      const key = window.localStorage.key(index);
-
-      if (key === null) {
-        continue;
-      }
-
-      entries[key] = window.localStorage.getItem(key);
-    }
-
-    return entries;
-  }
-
-  async function readLocalStorageFromActiveTab() {
-    const activeTab = await getCurrentActiveTab();
-
-    try {
-      const results = await chrome.scripting.executeScript({
-        target: { tabId: activeTab.id },
-        func: collectLocalStorageEntries
-      });
-
-      const [result] = Array.isArray(results) ? results : [];
-
-      if (!result || !result.result || typeof result.result !== "object") {
-        return {};
-      }
-
-      return result.result;
-    } catch (error) {
-      throw new Error(error && error.message ? error.message : "Failed to inject localStorage reader.");
-    }
-  }
-
   async function deleteProfile(profileId) {
-    const profiles = await loadProfiles();
+    const profiles = await readProfilesFromStorage();
     const nextProfiles = profiles.filter((profile) => profile.id !== profileId);
 
-    await saveProfiles(nextProfiles);
+    await writeProfilesToStorage(nextProfiles);
     return nextProfiles;
   }
 
@@ -518,24 +524,68 @@ document.addEventListener("DOMContentLoaded", () => {
     return Object.keys(profile.localStorage).length;
   }
 
+  function createActionButton({ label, busyLabel, variantClass, isBusy, onClick }) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `button ${variantClass}`;
+    button.disabled = Boolean(busyState);
+    button.textContent = isBusy ? busyLabel : label;
+    button.addEventListener("click", onClick);
+    return button;
+  }
+
+  async function handleProfileAction({
+    profile,
+    action,
+    beforeMessage,
+    successMessage,
+    failureMessage,
+    run
+  }) {
+    if (busyState) {
+      return;
+    }
+
+    setBusyState({
+      scope: "profile",
+      action,
+      profileId: profile.id
+    });
+    showStatus(beforeMessage, "info");
+
+    try {
+      await run();
+      showStatus(successMessage, "success");
+    } catch (error) {
+      console.error(`${action} failed`, error);
+      showStatus(failureMessage, "error");
+    } finally {
+      setBusyState(null);
+    }
+  }
+
+  function renderEmptyProfilesState() {
+    const emptyState = document.createElement("div");
+    emptyState.className = "profiles-list__empty";
+
+    const emptyTitle = document.createElement("p");
+    emptyTitle.className = "profiles-list__empty-title";
+    emptyTitle.textContent = "No profiles saved yet";
+
+    const emptyHint = document.createElement("p");
+    emptyHint.className = "profiles-list__empty-hint";
+    emptyHint.textContent = "Save the current tab session to create a reusable demo profile.";
+
+    emptyState.append(emptyTitle, emptyHint);
+    profilesList.appendChild(emptyState);
+  }
+
   function renderProfiles(profiles) {
     currentProfiles = Array.isArray(profiles) ? profiles : [];
     profilesList.textContent = "";
 
     if (!currentProfiles.length) {
-      const emptyState = document.createElement("div");
-      emptyState.className = "profiles-list__empty";
-
-      const emptyTitle = document.createElement("p");
-      emptyTitle.className = "profiles-list__empty-title";
-      emptyTitle.textContent = "No profiles saved yet";
-
-      const emptyHint = document.createElement("p");
-      emptyHint.className = "profiles-list__empty-hint";
-      emptyHint.textContent = "Save the current tab session to create a reusable demo profile.";
-
-      emptyState.append(emptyTitle, emptyHint);
-      profilesList.appendChild(emptyState);
+      renderEmptyProfilesState();
       return;
     }
 
@@ -568,70 +618,44 @@ document.addEventListener("DOMContentLoaded", () => {
       const actions = document.createElement("div");
       actions.className = "profile-card__actions";
 
-      const activateButton = document.createElement("button");
-      activateButton.type = "button";
-      activateButton.className = "button button--secondary";
-      activateButton.disabled = Boolean(busyState);
-      activateButton.textContent = isProfileActionBusy("activate", profile.id)
-        ? "Activating..."
-        : "Activate";
-      activateButton.addEventListener("click", async () => {
-        if (busyState) {
-          return;
-        }
-
-        setBusyState({
-          scope: "profile",
-          action: "activate",
-          profileId: profile.id
-        });
-        showStatus(`Activating ${profile.profileName}...`, "info");
-
-        try {
-          await activateProfile(profile);
-          showStatus("Session activated successfully", "success");
-        } catch (error) {
-          console.error("Activation failed", error);
-          showStatus("Failed to activate session", "error");
-        } finally {
-          setBusyState(null);
+      const activateButton = createActionButton({
+        label: "Activate",
+        busyLabel: "Activating...",
+        variantClass: "button--secondary",
+        isBusy: isProfileActionBusy("activate", profile.id),
+        onClick: async () => {
+          await handleProfileAction({
+            profile,
+            action: "activate",
+            beforeMessage: `Activating ${profile.profileName}...`,
+            successMessage: "Session activated successfully",
+            failureMessage: "Failed to activate session",
+            run: () => activateProfile(profile)
+          });
         }
       });
 
-      const deleteButton = document.createElement("button");
-      deleteButton.type = "button";
-      deleteButton.className = "button button--ghost";
-      deleteButton.disabled = Boolean(busyState);
-      deleteButton.textContent = isProfileActionBusy("delete", profile.id)
-        ? "Deleting..."
-        : "Delete";
-      deleteButton.addEventListener("click", async () => {
-        if (busyState) {
-          return;
-        }
+      const deleteButton = createActionButton({
+        label: "Delete",
+        busyLabel: "Deleting...",
+        variantClass: "button--ghost",
+        isBusy: isProfileActionBusy("delete", profile.id),
+        onClick: async () => {
+          if (!window.confirm(`Delete profile "${profile.profileName}"?`)) {
+            return;
+          }
 
-        const confirmed = window.confirm(`Delete profile "${profile.profileName}"?`);
-
-        if (!confirmed) {
-          return;
-        }
-
-        setBusyState({
-          scope: "profile",
-          action: "delete",
-          profileId: profile.id
-        });
-        showStatus(`Deleting ${profile.profileName}...`, "info");
-
-        try {
-          const profiles = await deleteProfile(profile.id);
-          renderProfiles(profiles);
-          showStatus("Profile deleted", "success");
-        } catch (error) {
-          console.error("Failed to delete profile", error);
-          showStatus("Failed to delete profile.", "error");
-        } finally {
-          setBusyState(null);
+          await handleProfileAction({
+            profile,
+            action: "delete",
+            beforeMessage: `Deleting ${profile.profileName}...`,
+            successMessage: "Profile deleted",
+            failureMessage: "Failed to delete profile.",
+            run: async () => {
+              const profiles = await deleteProfile(profile.id);
+              renderProfiles(profiles);
+            }
+          });
         }
       });
 
@@ -645,7 +669,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   async function initializePopup() {
     try {
-      const profiles = await loadProfiles();
+      const profiles = await readProfilesFromStorage();
       renderProfiles(profiles);
     } catch (error) {
       console.error("Failed to load profiles", error);
@@ -661,17 +685,8 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   /**
-   * Saved profile shape stored in chrome.storage.local under the "profiles" key.
-   * {
-   *   id: string,
-   *   profileName: string,
-   *   domain: string,
-   *   savedAt: string,
-   *   cookies: chrome.cookies.Cookie[],
-   *   localStorage: Record<string, string | null>, // origin-specific data for the saved tab origin
-   *   activeTabUrl: string,
-   *   activeTabOrigin: string
-   * }
+   * This is the saved profile data kept in Chrome storage.
+   * It is the full "session snapshot" we can re-apply later for demos or testing.
    */
   function createProfile({
     profileName,
@@ -693,6 +708,24 @@ document.addEventListener("DOMContentLoaded", () => {
     };
   }
 
+  function focusFieldForSaveError(error) {
+    if (!error || !error.message) {
+      return;
+    }
+
+    if (error.message === PROFILE_NAME_REQUIRED_MESSAGE) {
+      profileNameInput.focus();
+      return;
+    }
+
+    if (
+      error.message === DOMAIN_REQUIRED_MESSAGE ||
+      error.message === INVALID_DOMAIN_MESSAGE
+    ) {
+      domainInput.focus();
+    }
+  }
+
   saveSessionButton.addEventListener("click", async () => {
     if (busyState) {
       return;
@@ -708,7 +741,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const activeTabContext = getActiveTabUrlContext(activeTab);
       const { cookies } = await readCookiesForDomain(normalizedDomain);
       const localStorageEntries = await readLocalStorageFromActiveTab();
-      const profiles = await loadProfiles();
+      const profiles = await readProfilesFromStorage();
       const nextProfile = createProfile({
         profileName,
         domain: normalizedDomain,
@@ -719,7 +752,7 @@ document.addEventListener("DOMContentLoaded", () => {
       });
 
       profiles.unshift(nextProfile);
-      await saveProfiles(profiles);
+      await writeProfilesToStorage(profiles);
       renderProfiles(profiles);
       showStatus("Session saved successfully", "success");
 
@@ -734,18 +767,7 @@ document.addEventListener("DOMContentLoaded", () => {
       profileNameInput.focus();
     } catch (error) {
       console.error("Failed to save session", error);
-
-      if (error && error.message === "Profile name is required.") {
-        profileNameInput.focus();
-      }
-
-      if (
-        error &&
-        (error.message === "Domain is required." || error.message === "Enter a valid domain.")
-      ) {
-        domainInput.focus();
-      }
-
+      focusFieldForSaveError(error);
       showStatus("Failed to save session", "error");
     } finally {
       setBusyState(null);
