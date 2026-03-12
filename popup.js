@@ -176,12 +176,17 @@ document.addEventListener("DOMContentLoaded", () => {
     };
   }
 
-  function buildCookieUrl(cookie, fallbackHostname) {
+  function getCookieHostname(cookie, fallbackHostname) {
     const normalizedFallbackHost = normalizeCookieDomain(fallbackHostname);
     const cookieDomain =
       typeof cookie.domain === "string" && cookie.domain.trim()
         ? cookie.domain.replace(/^\.+/, "")
         : normalizedFallbackHost;
+    return cookieDomain;
+  }
+
+  function buildCookieUrl(cookie, fallbackHostname) {
+    const cookieDomain = getCookieHostname(cookie, fallbackHostname);
     const protocol = cookie.secure ? "https:" : "http:";
     const path = typeof cookie.path === "string" && cookie.path ? cookie.path : "/";
 
@@ -228,8 +233,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function restoreCookie(cookie, fallbackHostname) {
     return new Promise((resolve) => {
+      const cookieHostname = getCookieHostname(cookie, fallbackHostname);
       const details = {
-        url: buildCookieUrl(cookie, fallbackHostname),
+        url: buildCookieUrl(
+          {
+            ...cookie,
+            domain: cookie.hostOnly ? cookieHostname : cookie.domain
+          },
+          fallbackHostname
+        ),
         name: cookie.name,
         value: typeof cookie.value === "string" ? cookie.value : "",
         path: typeof cookie.path === "string" && cookie.path ? cookie.path : "/",
@@ -237,7 +249,8 @@ document.addEventListener("DOMContentLoaded", () => {
         httpOnly: Boolean(cookie.httpOnly)
       };
 
-      if (typeof cookie.domain === "string" && cookie.domain.trim()) {
+      // Omitting domain preserves host-only cookies so site logout can target them correctly.
+      if (!cookie.hostOnly && typeof cookie.domain === "string" && cookie.domain.trim()) {
         details.domain = cookie.domain;
       }
 
@@ -245,7 +258,7 @@ document.addEventListener("DOMContentLoaded", () => {
         details.sameSite = cookie.sameSite;
       }
 
-      if (typeof cookie.expirationDate === "number") {
+      if (!cookie.session && typeof cookie.expirationDate === "number") {
         details.expirationDate = cookie.expirationDate;
       }
 
