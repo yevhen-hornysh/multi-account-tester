@@ -98,7 +98,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  function getActiveTab() {
+  function getCurrentActiveTab() {
     return new Promise((resolve, reject) => {
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         if (chrome.runtime.lastError) {
@@ -118,14 +118,60 @@ document.addEventListener("DOMContentLoaded", () => {
           return;
         }
 
-        if (!activeTab.url) {
-          reject(new Error("The active tab does not have a readable URL."));
-          return;
-        }
-
         resolve(activeTab);
       });
     });
+  }
+
+  function getActiveTabUrlContext(activeTab) {
+    if (!activeTab || !activeTab.url) {
+      throw new Error("The active tab does not have a readable URL.");
+    }
+
+    try {
+      const parsedUrl = new URL(activeTab.url);
+
+      return {
+        url: activeTab.url,
+        origin: parsedUrl.origin,
+        hostname: parsedUrl.hostname.toLowerCase()
+      };
+    } catch (error) {
+      throw new Error("The active tab does not have a readable URL.");
+    }
+  }
+
+  function domainsMatch(savedProfileDomain, activeTabHostname) {
+    const normalizedSavedDomain = normalizeCookieDomain(savedProfileDomain);
+    const normalizedActiveHostname = normalizeCookieDomain(activeTabHostname);
+
+    if (normalizedSavedDomain === normalizedActiveHostname) {
+      return true;
+    }
+
+    return (
+      normalizedActiveHostname.endsWith(`.${normalizedSavedDomain}`) ||
+      normalizedSavedDomain.endsWith(`.${normalizedActiveHostname}`)
+    );
+  }
+
+  async function validateActivation(profile) {
+    const activeTab = await getCurrentActiveTab();
+    const activeTabContext = getActiveTabUrlContext(activeTab);
+
+    if (!domainsMatch(profile.domain, activeTabContext.hostname)) {
+      return {
+        canActivate: false,
+        message: `Domain mismatch: saved for ${profile.domain}, active tab is ${activeTabContext.hostname}.`,
+        type: "error"
+      };
+    }
+
+    return {
+      canActivate: true,
+      message: `Validation passed for ${profile.profileName}. Activation can proceed.`,
+      type: "success"
+    };
   }
 
   function collectLocalStorageEntries() {
@@ -145,7 +191,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   async function readLocalStorageFromActiveTab() {
-    const activeTab = await getActiveTab();
+    const activeTab = await getCurrentActiveTab();
 
     try {
       const results = await chrome.scripting.executeScript({
@@ -218,9 +264,25 @@ document.addEventListener("DOMContentLoaded", () => {
       activateButton.type = "button";
       activateButton.className = "button button--secondary";
       activateButton.textContent = "Activate";
-      activateButton.addEventListener("click", () => {
-        console.log("Activate profile placeholder", profile);
-        showStatus(`Activate is not implemented for "${profile.profileName}" yet.`);
+      activateButton.addEventListener("click", async () => {
+        try {
+          const validation = await validateActivation(profile);
+          showStatus(validation.message, validation.type);
+        } catch (error) {
+          console.error("Activation validation failed", error);
+
+          if (error && error.message === "No active tab found.") {
+            showStatus("No active tab found.", "error");
+            return;
+          }
+
+          if (error && error.message === "The active tab does not have a readable URL.") {
+            showStatus("The active tab does not have a readable URL.", "error");
+            return;
+          }
+
+          showStatus("Activation validation failed.", "error");
+        }
       });
 
       const deleteButton = document.createElement("button");
@@ -294,8 +356,8 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       const profileName = validateProfileName(profileNameInput.value);
       const normalizedDomain = normalizeCookieDomain(domainInput.value);
-      const activeTab = await getActiveTab();
-      const activeTabOrigin = new URL(activeTab.url).origin;
+      const activeTab = await getCurrentActiveTab();
+      const activeTabContext = getActiveTabUrlContext(activeTab);
       const { cookies } = await readCookiesForDomain(normalizedDomain);
       const localStorageEntries = await readLocalStorageFromActiveTab();
       const profiles = await loadProfiles();
@@ -304,8 +366,8 @@ document.addEventListener("DOMContentLoaded", () => {
         domain: normalizedDomain,
         cookies,
         localStorageEntries,
-        activeTabUrl: activeTab.url,
-        activeTabOrigin
+        activeTabUrl: activeTabContext.url,
+        activeTabOrigin: activeTabContext.origin
       });
 
       profiles.unshift(nextProfile);
