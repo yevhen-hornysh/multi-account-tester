@@ -1,6 +1,7 @@
 document.addEventListener("DOMContentLoaded", () => {
   const profileNameInput = document.getElementById("profileName");
   const domainInput = document.getElementById("domain");
+  const useCurrentSiteButton = document.getElementById("useCurrentSiteButton");
   const saveSessionButton = document.getElementById("saveSessionButton");
   const profilesList = document.getElementById("profilesList");
   const statusMessage = document.getElementById("statusMessage");
@@ -33,6 +34,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function applyBusyState() {
     const isBusy = Boolean(busyState);
     saveSessionButton.disabled = isBusy;
+    useCurrentSiteButton.disabled = isBusy;
     saveSessionButton.textContent =
       busyState && busyState.scope === "save" ? "Saving..." : "Save current session";
     profileNameInput.disabled = isBusy;
@@ -165,6 +167,23 @@ document.addEventListener("DOMContentLoaded", () => {
     } catch (error) {
       throw new Error("The active tab does not have a readable URL.");
     }
+  }
+
+  async function getCurrentSiteHostname() {
+    const activeTab = await getCurrentActiveTab();
+    const activeTabContext = getActiveTabUrlContext(activeTab);
+    return normalizeCookieDomain(activeTabContext.hostname);
+  }
+
+  async function fillDomainFromCurrentSite({ showFeedback = false } = {}) {
+    const currentHostname = await getCurrentSiteHostname();
+    domainInput.value = currentHostname;
+
+    if (showFeedback) {
+      showStatus(`Using ${currentHostname}`, "success");
+    }
+
+    return currentHostname;
   }
 
   function domainsMatch(savedProfileDomain, activeTabHostname) {
@@ -487,6 +506,18 @@ document.addEventListener("DOMContentLoaded", () => {
     }).format(parsedDate);
   }
 
+  function getProfileCookieCount(profile) {
+    return Array.isArray(profile.cookies) ? profile.cookies.length : 0;
+  }
+
+  function getProfileLocalStorageCount(profile) {
+    if (!profile.localStorage || typeof profile.localStorage !== "object") {
+      return 0;
+    }
+
+    return Object.keys(profile.localStorage).length;
+  }
+
   function renderProfiles(profiles) {
     currentProfiles = Array.isArray(profiles) ? profiles : [];
     profilesList.textContent = "";
@@ -529,7 +560,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
       const profileMeta = document.createElement("p");
       profileMeta.className = "profile-card__meta";
-      profileMeta.textContent = `Saved ${formatSavedAt(profile.savedAt)}`;
+      profileMeta.textContent =
+        `Saved ${formatSavedAt(profile.savedAt)} • ` +
+        `${getProfileCookieCount(profile)} cookies • ` +
+        `${getProfileLocalStorageCount(profile)} localStorage entries`;
 
       const actions = document.createElement("div");
       actions.className = "profile-card__actions";
@@ -576,6 +610,12 @@ document.addEventListener("DOMContentLoaded", () => {
           return;
         }
 
+        const confirmed = window.confirm(`Delete profile "${profile.profileName}"?`);
+
+        if (!confirmed) {
+          return;
+        }
+
         setBusyState({
           scope: "profile",
           action: "delete",
@@ -611,6 +651,12 @@ document.addEventListener("DOMContentLoaded", () => {
       console.error("Failed to load profiles", error);
       renderProfiles([]);
       showStatus("Failed to load saved profiles.", "error");
+    }
+
+    try {
+      await fillDomainFromCurrentSite();
+    } catch (error) {
+      console.debug("Could not auto-fill domain from active tab", error);
     }
   }
 
@@ -678,7 +724,13 @@ document.addEventListener("DOMContentLoaded", () => {
       showStatus("Session saved successfully", "success");
 
       profileNameInput.value = "";
-      domainInput.value = "";
+
+      try {
+        await fillDomainFromCurrentSite();
+      } catch (error) {
+        domainInput.value = "";
+      }
+
       profileNameInput.focus();
     } catch (error) {
       console.error("Failed to save session", error);
@@ -697,6 +749,19 @@ document.addEventListener("DOMContentLoaded", () => {
       showStatus("Failed to save session", "error");
     } finally {
       setBusyState(null);
+    }
+  });
+
+  useCurrentSiteButton.addEventListener("click", async () => {
+    if (busyState) {
+      return;
+    }
+
+    try {
+      await fillDomainFromCurrentSite({ showFeedback: true });
+    } catch (error) {
+      console.error("Failed to use current site", error);
+      showStatus("Could not read the current site domain.", "error");
     }
   });
 

@@ -34,13 +34,22 @@
 
         <div class="field">
           <label for="domain">Domain</label>
-          <input
-            id="domain"
-            name="domain"
-            type="text"
-            placeholder="example.com"
-            autocomplete="off"
-          />
+          <div class="field__input-row">
+            <input
+              id="domain"
+              name="domain"
+              type="text"
+              placeholder="example.com"
+              autocomplete="off"
+            />
+            <button
+              id="useCurrentSiteButton"
+              class="button button--ghost button--inline"
+              type="button"
+            >
+              Use current site
+            </button>
+          </div>
         </div>
 
         <button id="saveSessionButton" class="button button--primary" type="button">
