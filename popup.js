@@ -88,6 +88,73 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  function getActiveTab() {
+    return new Promise((resolve, reject) => {
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+
+        if (!Array.isArray(tabs) || !tabs.length) {
+          reject(new Error("No active tab found."));
+          return;
+        }
+
+        const [activeTab] = tabs;
+
+        if (!activeTab || typeof activeTab.id !== "number") {
+          reject(new Error("No active tab found."));
+          return;
+        }
+
+        if (!activeTab.url) {
+          reject(new Error("The active tab does not have a readable URL."));
+          return;
+        }
+
+        resolve(activeTab);
+      });
+    });
+  }
+
+  function collectLocalStorageEntries() {
+    const entries = {};
+
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const key = window.localStorage.key(index);
+
+      if (key === null) {
+        continue;
+      }
+
+      entries[key] = window.localStorage.getItem(key);
+    }
+
+    return entries;
+  }
+
+  async function readLocalStorageFromActiveTab() {
+    const activeTab = await getActiveTab();
+
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: activeTab.id },
+        func: collectLocalStorageEntries
+      });
+
+      const [result] = Array.isArray(results) ? results : [];
+
+      if (!result || !result.result || typeof result.result !== "object") {
+        return {};
+      }
+
+      return result.result;
+    } catch (error) {
+      throw new Error(error && error.message ? error.message : "Failed to inject localStorage reader.");
+    }
+  }
+
   async function deleteProfile(profileId) {
     const profiles = await loadProfiles();
     const nextProfiles = profiles.filter((profile) => profile.id !== profileId);
@@ -209,15 +276,49 @@ document.addEventListener("DOMContentLoaded", () => {
       await saveProfiles(profiles);
       renderProfiles(profiles);
 
+      let cookies = [];
+      let localStorageEntries = null;
+      let cookieReadFailed = false;
+      let localStorageReadFailed = false;
+
       try {
-        const { normalizedDomain, cookies } = await readCookiesForDomain(domain);
+        const { normalizedDomain, cookies: readCookies } = await readCookiesForDomain(domain);
+        cookies = readCookies;
         console.log(`Cookies for ${normalizedDomain}`, cookies);
-        showStatus(`Saved profile "${nextProfile.profileName}". Found ${cookies.length} cookies.`, "success");
       } catch (cookieError) {
+        cookieReadFailed = true;
         console.error("Failed to read cookies for domain", domain, cookieError);
+      }
+
+      try {
+        localStorageEntries = await readLocalStorageFromActiveTab();
+        console.log("localStorage for active tab", localStorageEntries);
+      } catch (localStorageError) {
+        localStorageReadFailed = true;
+        console.error("Failed to read localStorage from active tab", localStorageError);
+      }
+
+      if (cookieReadFailed && localStorageReadFailed) {
         showStatus(
-          `Saved profile "${nextProfile.profileName}", but cookie lookup failed.`,
+          `Saved profile "${nextProfile.profileName}", but cookie and localStorage reads failed.`,
           "error"
+        );
+      } else if (cookieReadFailed) {
+        const localStorageCount = Object.keys(localStorageEntries || {}).length;
+        showStatus(
+          `Saved profile "${nextProfile.profileName}", but cookie lookup failed. Read ${localStorageCount} localStorage entries.`,
+          "error"
+        );
+      } else if (localStorageReadFailed) {
+        showStatus(
+          `Saved profile "${nextProfile.profileName}". Found ${cookies.length} cookies, but localStorage read failed.`,
+          "error"
+        );
+      } else {
+        const localStorageCount = Object.keys(localStorageEntries || {}).length;
+        showStatus(
+          `Saved profile "${nextProfile.profileName}". Found ${cookies.length} cookies. Read ${localStorageCount} localStorage entries.`,
+          "success"
         );
       }
 
