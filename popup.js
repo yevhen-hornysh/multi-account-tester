@@ -45,6 +45,49 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  function normalizeCookieDomain(input) {
+    const trimmedValue = input.trim().toLowerCase();
+
+    if (!trimmedValue) {
+      throw new Error("Domain is required.");
+    }
+
+    const valueWithoutProtocol = trimmedValue.replace(/^[a-z]+:\/\//i, "");
+    const hostWithOptionalPath = valueWithoutProtocol.split("/")[0];
+    const normalizedHost = hostWithOptionalPath.replace(/^\.+/, "").replace(/^www\./, "");
+
+    if (!normalizedHost) {
+      throw new Error("Enter a valid domain.");
+    }
+
+    return normalizedHost;
+  }
+
+  function readCookiesForDomain(domainInputValue) {
+    return new Promise((resolve, reject) => {
+      let normalizedDomain;
+
+      try {
+        normalizedDomain = normalizeCookieDomain(domainInputValue);
+      } catch (error) {
+        reject(error);
+        return;
+      }
+
+      chrome.cookies.getAll({ domain: normalizedDomain }, (cookies) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+
+        resolve({
+          normalizedDomain,
+          cookies: Array.isArray(cookies) ? cookies : []
+        });
+      });
+    });
+  }
+
   async function deleteProfile(profileId) {
     const profiles = await loadProfiles();
     const nextProfiles = profiles.filter((profile) => profile.id !== profileId);
@@ -166,11 +209,21 @@ document.addEventListener("DOMContentLoaded", () => {
       await saveProfiles(profiles);
       renderProfiles(profiles);
 
+      try {
+        const { normalizedDomain, cookies } = await readCookiesForDomain(domain);
+        console.log(`Cookies for ${normalizedDomain}`, cookies);
+        showStatus(`Saved profile "${nextProfile.profileName}". Found ${cookies.length} cookies.`, "success");
+      } catch (cookieError) {
+        console.error("Failed to read cookies for domain", domain, cookieError);
+        showStatus(
+          `Saved profile "${nextProfile.profileName}", but cookie lookup failed.`,
+          "error"
+        );
+      }
+
       profileNameInput.value = "";
       domainInput.value = "";
       profileNameInput.focus();
-
-      showStatus(`Saved profile "${nextProfile.profileName}".`, "success");
     } catch (error) {
       console.error("Failed to save profile metadata", error);
       showStatus("Failed to save profile.", "error");
