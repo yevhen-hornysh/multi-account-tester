@@ -9,6 +9,12 @@
   --accent: #18c7b1;
   --accent-dark: #0f9c8b;
   --accent-soft: rgba(24, 199, 177, 0.12);
+  --info-bg: rgba(17, 181, 228, 0.1);
+  --info-text: #0d6f94;
+  --success-bg: rgba(24, 199, 177, 0.12);
+  --success-text: #0f7f72;
+  --error-bg: rgba(198, 70, 70, 0.12);
+  --error-text: #b23b3b;
   --input-border: #cfd7df;
   --shadow: 0 12px 28px rgba(36, 48, 67, 0.08);
 }
@@ -26,10 +32,13 @@ body {
   width: var(--popup-width);
   padding: 18px;
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .popup__header {
-  margin-bottom: 14px;
+  margin-bottom: 0;
 }
 
 .popup__eyebrow {
@@ -55,7 +64,6 @@ body {
 }
 
 .panel {
-  margin-bottom: 12px;
   padding: 14px;
   background: var(--panel-bg);
   border: 1px solid var(--panel-border);
@@ -115,6 +123,12 @@ body {
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
+.field input:disabled {
+  cursor: wait;
+  opacity: 0.75;
+  background: #f2f6f8;
+}
+
 .button {
   width: 100%;
   border: 0;
@@ -128,6 +142,13 @@ body {
 
 .button:hover {
   transform: translateY(-1px);
+}
+
+.button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+  transform: none;
+  box-shadow: none;
 }
 
 .button:active {
@@ -155,10 +176,25 @@ body {
 }
 
 .profiles-list__empty {
-  margin: 0;
-  padding: 26px 14px;
+  padding: 24px 14px;
   text-align: center;
+}
+
+.profiles-list__empty-title,
+.profiles-list__empty-hint {
+  margin: 0;
+}
+
+.profiles-list__empty-title {
   font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.profiles-list__empty-hint {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.45;
   color: var(--text-secondary);
 }
 
@@ -195,12 +231,14 @@ body {
 .profile-card__actions {
   display: flex;
   gap: 8px;
+  align-items: stretch;
 }
 
 .button--secondary,
 .button--ghost {
   width: auto;
   flex: 1;
+  min-height: 40px;
   padding: 10px 12px;
   font-size: 13px;
   box-shadow: none;
@@ -220,26 +258,42 @@ body {
 .status-message {
   min-height: 18px;
   margin: 0;
-  padding: 2px 4px 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid transparent;
   font-size: 12px;
   font-weight: 600;
+  line-height: 1.4;
   color: var(--text-secondary);
+  background: transparent;
+  opacity: 0;
+  transition: opacity 0.16s ease;
 }
 
 .status-message.is-visible {
   opacity: 1;
 }
 
-.status-message--success,
 .status-message--info {
-  color: var(--accent-dark);
+  color: var(--info-text);
+  background: var(--info-bg);
+  border-color: rgba(17, 181, 228, 0.12);
+}
+
+.status-message--success {
+  color: var(--success-text);
+  background: var(--success-bg);
+  border-color: rgba(24, 199, 177, 0.14);
 }
 
 .status-message--error {
-  color: #c64646;
+  color: var(--error-text);
+  background: var(--error-bg);
+  border-color: rgba(198, 70, 70, 0.16);
 }
 
 .status-message:empty {
   min-height: 0;
-  padding-top: 0;
+  padding: 0;
+  border-width: 0;
 }
