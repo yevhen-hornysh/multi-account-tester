@@ -7,6 +7,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const STORAGE_KEY = "profiles";
 
   let statusTimeoutId;
+  let currentProfiles = [];
+  let busyState = null;
 
   function showStatus(message, type = "info") {
     window.clearTimeout(statusTimeoutId);
@@ -17,6 +19,30 @@ document.addEventListener("DOMContentLoaded", () => {
       statusMessage.textContent = "";
       statusMessage.className = "status-message";
     }, 1800);
+  }
+
+  function isProfileActionBusy(action, profileId) {
+    return Boolean(
+      busyState &&
+        busyState.scope === "profile" &&
+        busyState.action === action &&
+        busyState.profileId === profileId
+    );
+  }
+
+  function applyBusyState() {
+    const isBusy = Boolean(busyState);
+    saveSessionButton.disabled = isBusy;
+    saveSessionButton.textContent =
+      busyState && busyState.scope === "save" ? "Saving..." : "Save current session";
+    profileNameInput.disabled = isBusy;
+    domainInput.disabled = isBusy;
+    renderProfiles(currentProfiles);
+  }
+
+  function setBusyState(nextBusyState) {
+    busyState = nextBusyState;
+    applyBusyState();
   }
 
   function loadProfiles() {
@@ -449,23 +475,42 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function formatSavedAt(savedAt) {
-    return new Date(savedAt).toLocaleString();
+    const parsedDate = new Date(savedAt);
+
+    if (Number.isNaN(parsedDate.getTime())) {
+      return "Unknown time";
+    }
+
+    return new Intl.DateTimeFormat(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short"
+    }).format(parsedDate);
   }
 
   function renderProfiles(profiles) {
+    currentProfiles = Array.isArray(profiles) ? profiles : [];
     profilesList.textContent = "";
 
-    if (!profiles.length) {
-      const emptyState = document.createElement("p");
+    if (!currentProfiles.length) {
+      const emptyState = document.createElement("div");
       emptyState.className = "profiles-list__empty";
-      emptyState.textContent = "No saved profiles yet.";
+
+      const emptyTitle = document.createElement("p");
+      emptyTitle.className = "profiles-list__empty-title";
+      emptyTitle.textContent = "No profiles saved yet";
+
+      const emptyHint = document.createElement("p");
+      emptyHint.className = "profiles-list__empty-hint";
+      emptyHint.textContent = "Save the current tab session to create a reusable demo profile.";
+
+      emptyState.append(emptyTitle, emptyHint);
       profilesList.appendChild(emptyState);
       return;
     }
 
     const fragment = document.createDocumentFragment();
 
-    profiles.forEach((profile) => {
+    currentProfiles.forEach((profile) => {
       const profileCard = document.createElement("article");
       profileCard.className = "profile-card";
 
@@ -492,22 +537,52 @@ document.addEventListener("DOMContentLoaded", () => {
       const activateButton = document.createElement("button");
       activateButton.type = "button";
       activateButton.className = "button button--secondary";
-      activateButton.textContent = "Activate";
+      activateButton.disabled = Boolean(busyState);
+      activateButton.textContent = isProfileActionBusy("activate", profile.id)
+        ? "Activating..."
+        : "Activate";
       activateButton.addEventListener("click", async () => {
+        if (busyState) {
+          return;
+        }
+
+        setBusyState({
+          scope: "profile",
+          action: "activate",
+          profileId: profile.id
+        });
+        showStatus(`Activating ${profile.profileName}...`, "info");
+
         try {
           await activateProfile(profile);
           showStatus("Session activated successfully", "success");
         } catch (error) {
           console.error("Activation failed", error);
           showStatus("Failed to activate session", "error");
+        } finally {
+          setBusyState(null);
         }
       });
 
       const deleteButton = document.createElement("button");
       deleteButton.type = "button";
       deleteButton.className = "button button--ghost";
-      deleteButton.textContent = "Delete";
+      deleteButton.disabled = Boolean(busyState);
+      deleteButton.textContent = isProfileActionBusy("delete", profile.id)
+        ? "Deleting..."
+        : "Delete";
       deleteButton.addEventListener("click", async () => {
+        if (busyState) {
+          return;
+        }
+
+        setBusyState({
+          scope: "profile",
+          action: "delete",
+          profileId: profile.id
+        });
+        showStatus(`Deleting ${profile.profileName}...`, "info");
+
         try {
           const profiles = await deleteProfile(profile.id);
           renderProfiles(profiles);
@@ -515,6 +590,8 @@ document.addEventListener("DOMContentLoaded", () => {
         } catch (error) {
           console.error("Failed to delete profile", error);
           showStatus("Failed to delete profile.", "error");
+        } finally {
+          setBusyState(null);
         }
       });
 
@@ -571,6 +648,13 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   saveSessionButton.addEventListener("click", async () => {
+    if (busyState) {
+      return;
+    }
+
+    setBusyState({ scope: "save", action: "save" });
+    showStatus("Saving current session...", "info");
+
     try {
       const profileName = validateProfileName(profileNameInput.value);
       const normalizedDomain = normalizeCookieDomain(domainInput.value);
@@ -611,6 +695,8 @@ document.addEventListener("DOMContentLoaded", () => {
       }
 
       showStatus("Failed to save session", "error");
+    } finally {
+      setBusyState(null);
     }
   });
 
