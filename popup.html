@@ -9,26 +9,51 @@
   <body>
     <main class="popup">
       <header class="popup__header">
+        <p class="popup__eyebrow">Session Manager</p>
         <h1>Multi-Account Tester</h1>
+        <p class="popup__subtitle">Save the current browser session under a reusable test profile.</p>
       </header>
 
-      <section class="panel">
-        <h2>Form Area</h2>
-        <!-- Placeholder for future profile form controls. -->
-        <div class="panel__content"></div>
+      <section class="panel panel--form" aria-labelledby="save-session-title">
+        <div class="panel__title-row">
+          <h2 id="save-session-title">Save Session</h2>
+        </div>
+
+        <div class="field">
+          <label for="profileName">Profile name</label>
+          <input
+            id="profileName"
+            name="profileName"
+            type="text"
+            placeholder="QA Admin"
+            autocomplete="off"
+          />
+        </div>
+
+        <div class="field">
+          <label for="domain">Domain</label>
+          <input
+            id="domain"
+            name="domain"
+            type="text"
+            placeholder="example.com"
+            autocomplete="off"
+          />
+        </div>
+
+        <button id="saveSessionButton" class="button button--primary" type="button">
+          Save current session
+        </button>
       </section>
 
-      <section class="panel">
-        <h2>Profile List</h2>
-        <!-- Placeholder for future saved profile items. -->
-        <div class="panel__content"></div>
+      <section class="panel" aria-labelledby="saved-profiles-title">
+        <div class="panel__title-row">
+          <h2 id="saved-profiles-title">Saved profiles</h2>
+        </div>
+        <div id="profilesList" class="profiles-list"></div>
       </section>
 
-      <section class="panel">
-        <h2>Status</h2>
-        <!-- Placeholder for future status and feedback messages. -->
-        <div class="panel__content"></div>
-      </section>
+      <p id="statusMessage" class="status-message" role="status" aria-live="polite"></p>
     </main>
 
     <script src="popup.js"></script>
