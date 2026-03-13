@@ -15,6 +15,7 @@ document.addEventListener("DOMContentLoaded", () => {
     "The entered domain must match the current site or one of its parent domains.";
 
   let statusTimeoutId;
+  let allProfiles = [];
   let currentProfiles = [];
   let busyState = null;
 
@@ -47,7 +48,7 @@ document.addEventListener("DOMContentLoaded", () => {
       busyState && busyState.scope === "save" ? "Saving..." : "Save current session";
     profileNameInput.disabled = isBusy;
     domainInput.disabled = isBusy;
-    renderProfiles(currentProfiles);
+    renderProfiles(allProfiles);
   }
 
   function setBusyState(nextBusyState) {
@@ -170,6 +171,45 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  function readAllCookies() {
+    return new Promise((resolve, reject) => {
+      chrome.cookies.getAll({}, (cookies) => {
+        const runtimeError = getRuntimeError();
+
+        if (runtimeError) {
+          reject(runtimeError);
+          return;
+        }
+
+        resolve(Array.isArray(cookies) ? cookies : []);
+      });
+    });
+  }
+
+  async function readCookiesForProfileScope(profileDomain, activeTabHostname) {
+    const normalizedProfileDomain = normalizeCookieDomain(profileDomain);
+    const normalizedActiveHostname = normalizeCookieDomain(activeTabHostname);
+    const allCookies = await readAllCookies();
+    const scopedCookies = allCookies.filter((cookie) => {
+      try {
+        const cookieHostname = getCookieHostname(cookie, normalizedProfileDomain);
+
+        return (
+          domainsBelongToSameScope(cookieHostname, normalizedProfileDomain) ||
+          domainsBelongToSameScope(cookieHostname, normalizedActiveHostname)
+        );
+      } catch (error) {
+        console.debug("Skipping cookie during save scope build", error);
+        return false;
+      }
+    });
+
+    return {
+      normalizedDomain: normalizedProfileDomain,
+      cookies: scopedCookies
+    };
+  }
+
   function getCurrentActiveTab() {
     return new Promise((resolve, reject) => {
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -227,6 +267,7 @@ document.addEventListener("DOMContentLoaded", () => {
   async function fillDomainFromCurrentSite({ showFeedback = false } = {}) {
     const currentHostname = await getCurrentSiteHostname();
     domainInput.value = currentHostname;
+    renderProfiles(allProfiles);
 
     if (showFeedback) {
       showStatus(`Using ${currentHostname}`, "success");
@@ -243,6 +284,63 @@ document.addEventListener("DOMContentLoaded", () => {
       normalizedSavedDomain === normalizedActiveHostname ||
       normalizedActiveHostname.endsWith(`.${normalizedSavedDomain}`)
     );
+  }
+
+  function normalizeDomainForComparison(input) {
+    if (typeof input !== "string") {
+      return "";
+    }
+
+    let normalizedValue = input.trim().toLowerCase();
+
+    if (!normalizedValue) {
+      return "";
+    }
+
+    try {
+      const candidateValue = /^[a-z]+:\/\//i.test(normalizedValue)
+        ? normalizedValue
+        : `https://${normalizedValue.replace(/^\/+/, "")}`;
+
+      normalizedValue = new URL(candidateValue).hostname.toLowerCase();
+    } catch (error) {
+      normalizedValue = normalizedValue.replace(/^[a-z]+:\/\//i, "");
+      normalizedValue = normalizedValue.split("/")[0];
+      normalizedValue = normalizedValue.split("?")[0];
+      normalizedValue = normalizedValue.split("#")[0];
+      normalizedValue = normalizedValue.split(":")[0];
+    }
+
+    return normalizedValue.replace(/^\.+/, "").replace(/\.+$/, "");
+  }
+
+  function isDomainFilterMatch(profileDomain, selectedDomain) {
+    const normalizedProfileDomain = normalizeDomainForComparison(profileDomain);
+    const normalizedSelectedDomain = normalizeDomainForComparison(selectedDomain);
+
+    if (!normalizedSelectedDomain) {
+      return true;
+    }
+
+    if (!normalizedProfileDomain) {
+      return false;
+    }
+
+    return (
+      normalizedProfileDomain === normalizedSelectedDomain ||
+      normalizedProfileDomain.endsWith(`.${normalizedSelectedDomain}`) ||
+      normalizedSelectedDomain.endsWith(`.${normalizedProfileDomain}`)
+    );
+  }
+
+  function filterProfilesByDomain(profiles, selectedDomain) {
+    const profileList = Array.isArray(profiles) ? profiles : [];
+
+    if (!normalizeDomainForComparison(selectedDomain)) {
+      return profileList;
+    }
+
+    return profileList.filter((profile) => isDomainFilterMatch(profile.domain, selectedDomain));
   }
 
   function profileHasStoredLocalStorage(profile) {
@@ -298,6 +396,17 @@ document.addEventListener("DOMContentLoaded", () => {
     return cookieDomain;
   }
 
+  function domainsBelongToSameScope(firstDomain, secondDomain) {
+    const normalizedFirstDomain = normalizeCookieDomain(firstDomain);
+    const normalizedSecondDomain = normalizeCookieDomain(secondDomain);
+
+    return (
+      normalizedFirstDomain === normalizedSecondDomain ||
+      normalizedFirstDomain.endsWith(`.${normalizedSecondDomain}`) ||
+      normalizedSecondDomain.endsWith(`.${normalizedFirstDomain}`)
+    );
+  }
+
   function buildCookieUrl(cookie, fallbackHostname) {
     const cookieDomain = getCookieHostname(cookie, fallbackHostname);
     const protocol = cookie.secure ? "https:" : "http:";
@@ -333,14 +442,43 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  async function clearCookiesForProfileDomain(profileDomain) {
-    const { normalizedDomain, cookies } = await readCookiesForDomain(profileDomain);
+  async function clearCookiesForProfile(profile, activeTabHostname) {
+    const scopeDomains = new Set();
+    const normalizedProfileDomain = normalizeCookieDomain(profile.domain);
+    const normalizedActiveHostname = normalizeCookieDomain(activeTabHostname);
+    const savedCookies = Array.isArray(profile.cookies) ? profile.cookies : [];
+    const allCookies = await readAllCookies();
+
+    scopeDomains.add(normalizedProfileDomain);
+    scopeDomains.add(normalizedActiveHostname);
+
+    savedCookies.forEach((cookie) => {
+      try {
+        scopeDomains.add(getCookieHostname(cookie, normalizedProfileDomain));
+      } catch (error) {
+        console.debug("Skipping saved cookie domain during clear scope build", error);
+      }
+    });
+
+    const cookiesToRemove = allCookies.filter((cookie) => {
+      try {
+        const cookieHostname = getCookieHostname(cookie, normalizedProfileDomain);
+
+        return Array.from(scopeDomains).some((scopeDomain) =>
+          domainsBelongToSameScope(cookieHostname, scopeDomain)
+        );
+      } catch (error) {
+        console.debug("Skipping cookie during clear", error);
+        return false;
+      }
+    });
+
     const removalResults = await Promise.all(
-      cookies.map((cookie) => removeCookie(cookie, normalizedDomain))
+      cookiesToRemove.map((cookie) => removeCookie(cookie, normalizedProfileDomain))
     );
 
     return {
-      attempted: cookies.length,
+      attempted: cookiesToRemove.length,
       removed: removalResults.filter((result) => result.removed).length,
       failed: removalResults.filter((result) => result.error).length
     };
@@ -405,11 +543,11 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  async function restoreProfileCookies(profile) {
+  async function restoreProfileCookies(profile, activeTabHostname) {
     const normalizedDomain = normalizeCookieDomain(profile.domain);
     const savedCookies = Array.isArray(profile.cookies) ? profile.cookies : [];
 
-    await clearCookiesForProfileDomain(normalizedDomain);
+    await clearCookiesForProfile(profile, activeTabHostname);
 
     if (!savedCookies.length) {
       return {
@@ -457,6 +595,24 @@ document.addEventListener("DOMContentLoaded", () => {
     };
   }
 
+  function writeSessionStorageEntries(savedEntries) {
+    const entries = savedEntries && typeof savedEntries === "object" ? savedEntries : {};
+    const keys = Object.keys(entries);
+
+    // sessionStorage survives a reload in the same tab, so we must clear stale auth state explicitly.
+    window.sessionStorage.clear();
+
+    keys.forEach((key) => {
+      const value = entries[key];
+      window.sessionStorage.setItem(key, value === null ? "null" : String(value));
+    });
+
+    return {
+      cleared: true,
+      restored: keys.length
+    };
+  }
+
   function collectLocalStorageEntries() {
     const entries = {};
 
@@ -468,6 +624,22 @@ document.addEventListener("DOMContentLoaded", () => {
       }
 
       entries[key] = window.localStorage.getItem(key);
+    }
+
+    return entries;
+  }
+
+  function collectSessionStorageEntries() {
+    const entries = {};
+
+    for (let index = 0; index < window.sessionStorage.length; index += 1) {
+      const key = window.sessionStorage.key(index);
+
+      if (key === null) {
+        continue;
+      }
+
+      entries[key] = window.sessionStorage.getItem(key);
     }
 
     return entries;
@@ -508,9 +680,38 @@ document.addEventListener("DOMContentLoaded", () => {
     return result;
   }
 
+  async function restoreProfileSessionStorage(profile, activeTab) {
+    if (!activeTab || typeof activeTab.id !== "number") {
+      throw new Error("No active tab found.");
+    }
+
+    const savedSessionStorage =
+      profile.sessionStorage && typeof profile.sessionStorage === "object"
+        ? profile.sessionStorage
+        : {};
+    const result = await executeScriptInTab(activeTab.id, writeSessionStorageEntries, [
+      savedSessionStorage
+    ]);
+
+    if (!result || typeof result !== "object") {
+      return {
+        cleared: false,
+        restored: 0
+      };
+    }
+
+    return result;
+  }
+
   async function readLocalStorageFromActiveTab() {
     const activeTab = await getCurrentActiveTab();
     const result = await executeScriptInTab(activeTab.id, collectLocalStorageEntries);
+    return result && typeof result === "object" ? result : {};
+  }
+
+  async function readSessionStorageFromActiveTab() {
+    const activeTab = await getCurrentActiveTab();
+    const result = await executeScriptInTab(activeTab.id, collectSessionStorageEntries);
     return result && typeof result === "object" ? result : {};
   }
 
@@ -536,7 +737,7 @@ document.addEventListener("DOMContentLoaded", () => {
       throw new Error(validation.message);
     }
 
-    const cookieSummary = await restoreProfileCookies(profile);
+    const cookieSummary = await restoreProfileCookies(profile, validation.activeTabContext.hostname);
 
     if (cookieSummary.failed > 0) {
       console.error("Some cookies failed to restore", cookieSummary.failures);
@@ -544,6 +745,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     await restoreProfileLocalStorage(profile, validation.activeTab);
+    await restoreProfileSessionStorage(profile, validation.activeTab);
     await reloadTab(validation.activeTab.id);
   }
 
@@ -620,28 +822,35 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  function renderEmptyProfilesState() {
+  function renderEmptyProfilesState({ hasDomainFilter = false } = {}) {
     const emptyState = document.createElement("div");
     emptyState.className = "profiles-list__empty";
 
     const emptyTitle = document.createElement("p");
     emptyTitle.className = "profiles-list__empty-title";
-    emptyTitle.textContent = "No profiles saved yet";
+    emptyTitle.textContent = hasDomainFilter
+      ? "No saved profiles for this domain"
+      : "No profiles saved yet";
 
     const emptyHint = document.createElement("p");
     emptyHint.className = "profiles-list__empty-hint";
-    emptyHint.textContent = "Save the current tab session to create a reusable demo profile.";
+    emptyHint.textContent = hasDomainFilter
+      ? "Try another domain or save the current session for this site."
+      : "Save the current tab session to create a reusable demo profile.";
 
     emptyState.append(emptyTitle, emptyHint);
     profilesList.appendChild(emptyState);
   }
 
   function renderProfiles(profiles) {
-    currentProfiles = Array.isArray(profiles) ? profiles : [];
+    allProfiles = Array.isArray(profiles) ? profiles : [];
+    currentProfiles = filterProfilesByDomain(allProfiles, domainInput.value);
     profilesList.textContent = "";
 
     if (!currentProfiles.length) {
-      renderEmptyProfilesState();
+      renderEmptyProfilesState({
+        hasDomainFilter: Boolean(normalizeDomainForComparison(domainInput.value))
+      });
       return;
     }
 
@@ -749,6 +958,7 @@ document.addEventListener("DOMContentLoaded", () => {
     domain,
     cookies,
     localStorageEntries,
+    sessionStorageEntries,
     activeTabUrl,
     activeTabOrigin
   }) {
@@ -759,6 +969,7 @@ document.addEventListener("DOMContentLoaded", () => {
       savedAt: new Date().toISOString(),
       cookies,
       localStorage: localStorageEntries,
+      sessionStorage: sessionStorageEntries,
       activeTabUrl,
       activeTabOrigin
     };
@@ -801,14 +1012,19 @@ document.addEventListener("DOMContentLoaded", () => {
         throw new Error(DOMAIN_CONTEXT_MISMATCH_MESSAGE);
       }
 
-      const { cookies } = await readCookiesForDomain(normalizedDomain);
+      const { cookies } = await readCookiesForProfileScope(
+        normalizedDomain,
+        activeTabContext.hostname
+      );
       const localStorageEntries = await readLocalStorageFromActiveTab();
+      const sessionStorageEntries = await readSessionStorageFromActiveTab();
       const profiles = await readProfilesFromStorage();
       const nextProfile = createProfile({
         profileName,
         domain: normalizedDomain,
         cookies,
         localStorageEntries,
+        sessionStorageEntries,
         activeTabUrl: activeTabContext.url,
         activeTabOrigin: activeTabContext.origin
       });
@@ -850,6 +1066,14 @@ document.addEventListener("DOMContentLoaded", () => {
         "error"
       );
     }
+  });
+
+  domainInput.addEventListener("input", () => {
+    if (busyState) {
+      return;
+    }
+
+    renderProfiles(allProfiles);
   });
 
   initializePopup();
