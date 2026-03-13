@@ -808,12 +808,63 @@ document.addEventListener("DOMContentLoaded", () => {
     return allProfiles.find((profile) => profile.id === profileId) || null;
   }
 
-  function createActionButton({ label, busyLabel, variantClass, isBusy, onClick }) {
+  function createIcon(iconName) {
+    const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    icon.setAttribute("viewBox", "0 0 24 24");
+    icon.setAttribute("aria-hidden", "true");
+    icon.classList.add("button__icon");
+
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("fill", "none");
+    path.setAttribute("stroke", "currentColor");
+    path.setAttribute("stroke-linecap", "round");
+    path.setAttribute("stroke-linejoin", "round");
+    path.setAttribute("stroke-width", "1.8");
+
+    if (iconName === "view") {
+      path.setAttribute(
+        "d",
+        "M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z M12 15.25A3.25 3.25 0 1 0 12 8.75a3.25 3.25 0 0 0 0 6.5Z"
+      );
+    } else {
+      path.setAttribute(
+        "d",
+        "M4.5 7.5h15 M9.5 3.75h5 M9 10.5v6 M15 10.5v6 M7.5 7.5l.75 11.25a1.5 1.5 0 0 0 1.5 1.4h4.5a1.5 1.5 0 0 0 1.5-1.4L16.5 7.5"
+      );
+    }
+
+    icon.appendChild(path);
+    return icon;
+  }
+
+  function createActionButton({
+    label,
+    busyLabel,
+    variantClass,
+    isBusy,
+    onClick,
+    iconName = "",
+    title = ""
+  }) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = `button ${variantClass}`;
     button.disabled = Boolean(busyState);
-    button.textContent = isBusy ? busyLabel : label;
+
+    if (title) {
+      button.title = title;
+    }
+
+    if (iconName) {
+      button.setAttribute("aria-label", label);
+      if (isBusy) {
+        button.setAttribute("aria-busy", "true");
+      }
+      button.appendChild(createIcon(iconName));
+    } else {
+      button.textContent = isBusy ? busyLabel : label;
+    }
+
     button.addEventListener("click", onClick);
     return button;
   }
@@ -950,8 +1001,8 @@ document.addEventListener("DOMContentLoaded", () => {
       const profileCard = document.createElement("article");
       profileCard.className = "profile-card";
 
-      const profileHeader = document.createElement("div");
-      profileHeader.className = "profile-card__header";
+      const profileTopRow = document.createElement("div");
+      profileTopRow.className = "profile-card__top-row";
 
       const profileName = document.createElement("h3");
       profileName.className = "profile-card__title";
@@ -961,14 +1012,23 @@ document.addEventListener("DOMContentLoaded", () => {
       profileDomain.className = "profile-card__domain";
       profileDomain.textContent = profile.domain;
 
-      profileHeader.append(profileName, profileDomain);
+      profileTopRow.append(profileName, profileDomain);
 
-      const profileMeta = document.createElement("p");
-      profileMeta.className = "profile-card__meta";
-      profileMeta.textContent =
-        `Saved ${formatSavedAt(profile.savedAt)} • ` +
-        `${getProfileCookieCount(profile)} cookies • ` +
-        `${getProfileLocalStorageCount(profile)} localStorage entries`;
+      const profileMetaRow = document.createElement("div");
+      profileMetaRow.className = "profile-card__meta-row";
+
+      const metaItems = [
+        `Saved ${formatSavedAt(profile.savedAt)}`,
+        `${getProfileCookieCount(profile)} cookies`,
+        `${getProfileLocalStorageCount(profile)} localStorage`
+      ];
+
+      metaItems.forEach((text) => {
+        const metaItem = document.createElement("span");
+        metaItem.className = "profile-card__meta-item";
+        metaItem.textContent = text;
+        profileMetaRow.appendChild(metaItem);
+      });
 
       const actions = document.createElement("div");
       actions.className = "profile-card__actions";
@@ -976,8 +1036,10 @@ document.addEventListener("DOMContentLoaded", () => {
       const viewDetailsButton = createActionButton({
         label: "View details",
         busyLabel: "View details",
-        variantClass: "button--ghost",
+        variantClass: "button--icon button--ghost",
         isBusy: false,
+        iconName: "view",
+        title: "View details",
         onClick: () => setCurrentView("details", profile.id)
       });
       viewDetailsButton.disabled = Boolean(busyState);
@@ -1002,8 +1064,10 @@ document.addEventListener("DOMContentLoaded", () => {
       const deleteButton = createActionButton({
         label: "Delete",
         busyLabel: "Deleting...",
-        variantClass: "button--ghost",
+        variantClass: "button--icon button--ghost",
         isBusy: isProfileActionBusy("delete", profile.id),
+        iconName: "delete",
+        title: "Delete profile",
         onClick: async () => {
           if (!window.confirm(`Delete profile "${profile.profileName}"?`)) {
             return;
@@ -1024,7 +1088,7 @@ document.addEventListener("DOMContentLoaded", () => {
       });
 
       actions.append(viewDetailsButton, activateButton, deleteButton);
-      profileCard.append(profileHeader, profileMeta, actions);
+      profileCard.append(profileTopRow, profileMetaRow, actions);
       fragment.appendChild(profileCard);
     });
 
