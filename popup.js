@@ -17,6 +17,8 @@ document.addEventListener("DOMContentLoaded", () => {
   let busyState = null;
   let currentDomain = "";
   let currentDomainErrorMessage = "";
+  let currentView = "list";
+  let selectedProfileId = "";
 
   function showStatus(message, type = "info") {
     window.clearTimeout(statusTimeoutId);
@@ -51,6 +53,12 @@ document.addEventListener("DOMContentLoaded", () => {
   function setBusyState(nextBusyState) {
     busyState = nextBusyState;
     applyBusyState();
+  }
+
+  function setCurrentView(view, profileId = "") {
+    currentView = view;
+    selectedProfileId = profileId;
+    renderProfiles(allProfiles);
   }
 
   function getRuntimeError() {
@@ -796,6 +804,10 @@ document.addEventListener("DOMContentLoaded", () => {
     return Object.keys(profile.localStorage).length;
   }
 
+  function findProfileById(profileId) {
+    return allProfiles.find((profile) => profile.id === profileId) || null;
+  }
+
   function createActionButton({ label, busyLabel, variantClass, isBusy, onClick }) {
     const button = document.createElement("button");
     button.type = "button";
@@ -856,29 +868,75 @@ document.addEventListener("DOMContentLoaded", () => {
     profilesList.appendChild(emptyState);
   }
 
-  function renderProfiles(profiles) {
-    allProfiles = Array.isArray(profiles) ? profiles : [];
-    currentProfiles = filterProfilesByDomain(allProfiles, currentDomain);
-    profilesList.textContent = "";
+  function renderCurrentSiteUnavailableState() {
+    const emptyState = document.createElement("div");
+    emptyState.className = "profiles-list__empty";
 
-    if (!currentDomain) {
-      const emptyState = document.createElement("div");
-      emptyState.className = "profiles-list__empty";
+    const emptyTitle = document.createElement("p");
+    emptyTitle.className = "profiles-list__empty-title";
+    emptyTitle.textContent = "Current site unavailable";
 
-      const emptyTitle = document.createElement("p");
-      emptyTitle.className = "profiles-list__empty-title";
-      emptyTitle.textContent = "Current site unavailable";
+    const emptyHint = document.createElement("p");
+    emptyHint.className = "profiles-list__empty-hint";
+    emptyHint.textContent =
+      currentDomainErrorMessage || "Open an http:// or https:// page to view saved profiles.";
 
-      const emptyHint = document.createElement("p");
-      emptyHint.className = "profiles-list__empty-hint";
-      emptyHint.textContent =
-        currentDomainErrorMessage || "Open an http:// or https:// page to view saved profiles.";
+    emptyState.append(emptyTitle, emptyHint);
+    profilesList.appendChild(emptyState);
+  }
 
-      emptyState.append(emptyTitle, emptyHint);
-      profilesList.appendChild(emptyState);
-      return;
-    }
+  function createDetailsItem(label, value) {
+    const detailsItem = document.createElement("div");
+    detailsItem.className = "profile-details__item";
 
+    const detailsLabel = document.createElement("span");
+    detailsLabel.className = "profile-details__label";
+    detailsLabel.textContent = label;
+
+    const detailsValue = document.createElement("strong");
+    detailsValue.className = "profile-details__value";
+    detailsValue.textContent = value;
+
+    detailsItem.append(detailsLabel, detailsValue);
+    return detailsItem;
+  }
+
+  function renderProfileDetailsView(profile) {
+    const detailsView = document.createElement("article");
+    detailsView.className = "profile-details";
+
+    const backButton = createActionButton({
+      label: "Back",
+      busyLabel: "Back",
+      variantClass: "button--ghost button--inline",
+      isBusy: false,
+      onClick: () => setCurrentView("list")
+    });
+    backButton.disabled = false;
+
+    const title = document.createElement("h3");
+    title.className = "profile-details__title";
+    title.textContent = profile.profileName;
+
+    const subtitle = document.createElement("p");
+    subtitle.className = "profile-details__subtitle";
+    subtitle.textContent = "Saved session snapshot";
+
+    const grid = document.createElement("div");
+    grid.className = "profile-details__grid";
+    grid.append(
+      createDetailsItem("Profile name", profile.profileName),
+      createDetailsItem("Domain", profile.domain || "Unknown domain"),
+      createDetailsItem("Saved at", formatSavedAt(profile.savedAt)),
+      createDetailsItem("Cookies", String(getProfileCookieCount(profile))),
+      createDetailsItem("localStorage", String(getProfileLocalStorageCount(profile)))
+    );
+
+    detailsView.append(backButton, title, subtitle, grid);
+    profilesList.appendChild(detailsView);
+  }
+
+  function renderProfilesListView() {
     if (!currentProfiles.length) {
       renderEmptyProfilesState({
         hasDomainFilter: Boolean(normalizeDomainForComparison(currentDomain))
@@ -914,6 +972,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
       const actions = document.createElement("div");
       actions.className = "profile-card__actions";
+
+      const viewDetailsButton = createActionButton({
+        label: "View details",
+        busyLabel: "View details",
+        variantClass: "button--ghost",
+        isBusy: false,
+        onClick: () => setCurrentView("details", profile.id)
+      });
+      viewDetailsButton.disabled = Boolean(busyState);
 
       const activateButton = createActionButton({
         label: "Activate",
@@ -956,12 +1023,41 @@ document.addEventListener("DOMContentLoaded", () => {
         }
       });
 
-      actions.append(activateButton, deleteButton);
+      actions.append(viewDetailsButton, activateButton, deleteButton);
       profileCard.append(profileHeader, profileMeta, actions);
       fragment.appendChild(profileCard);
     });
 
     profilesList.appendChild(fragment);
+  }
+
+  function renderProfiles(profiles) {
+    allProfiles = Array.isArray(profiles) ? profiles : [];
+    currentProfiles = filterProfilesByDomain(allProfiles, currentDomain);
+    profilesList.textContent = "";
+
+    if (!currentDomain) {
+      currentView = "list";
+      selectedProfileId = "";
+      renderCurrentSiteUnavailableState();
+      return;
+    }
+
+    if (currentView === "details") {
+      const selectedProfile = findProfileById(selectedProfileId);
+
+      if (!selectedProfile || !isDomainFilterMatch(selectedProfile.domain, currentDomain)) {
+        currentView = "list";
+        selectedProfileId = "";
+        renderProfilesListView();
+        return;
+      }
+
+      renderProfileDetailsView(selectedProfile);
+      return;
+    }
+
+    renderProfilesListView();
   }
 
   async function initializePopup() {

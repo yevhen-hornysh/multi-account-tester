@@ -257,6 +257,7 @@ body {
   display: flex;
   gap: 8px;
   align-items: stretch;
+  flex-wrap: wrap;
 }
 
 .button--secondary,
@@ -285,6 +286,56 @@ body {
   min-width: 112px;
   padding: 11px 12px;
   white-space: nowrap;
+}
+
+.profile-details {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px;
+}
+
+.profile-details__title {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.3;
+}
+
+.profile-details__subtitle {
+  margin: -4px 0 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.profile-details__grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.profile-details__item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid rgba(36, 48, 67, 0.08);
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.profile-details__label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.profile-details__value {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text-primary);
+  word-break: break-word;
 }
 
 .status-message {
