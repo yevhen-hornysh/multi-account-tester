@@ -21,6 +21,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let selectedProfileId = "";
   let expandedValueRows = new Set();
   let editingLocalStorageEntry = null;
+  let editingCookieEntry = null;
 
   function showStatus(message, type = "info") {
     window.clearTimeout(statusTimeoutId);
@@ -62,6 +63,7 @@ document.addEventListener("DOMContentLoaded", () => {
     selectedProfileId = profileId;
     expandedValueRows = new Set();
     editingLocalStorageEntry = null;
+    editingCookieEntry = null;
     renderProfiles(allProfiles);
   }
 
@@ -800,6 +802,10 @@ document.addEventListener("DOMContentLoaded", () => {
     return Array.isArray(profile.cookies) ? profile.cookies.length : 0;
   }
 
+  function getProfileCookies(profile) {
+    return Array.isArray(profile.cookies) ? profile.cookies : [];
+  }
+
   function getProfileLocalStorageCount(profile) {
     if (!profile.localStorage || typeof profile.localStorage !== "object") {
       return 0;
@@ -825,6 +831,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function startEditingLocalStorageEntry(profileId, entryKey, entryValue) {
+    editingCookieEntry = null;
     editingLocalStorageEntry = {
       profileId,
       originalKey: entryKey,
@@ -884,6 +891,92 @@ document.addEventListener("DOMContentLoaded", () => {
 
     await writeProfilesToStorage(nextProfiles);
     editingLocalStorageEntry = null;
+    renderProfiles(nextProfiles);
+  }
+
+  function getNormalizedCookieSameSiteValue(sameSite) {
+    if (
+      sameSite === "lax" ||
+      sameSite === "strict" ||
+      sameSite === "no_restriction" ||
+      sameSite === "unspecified"
+    ) {
+      return sameSite;
+    }
+
+    return "unspecified";
+  }
+
+  function isEditingCookieEntry(profileId, cookieIndex) {
+    return Boolean(
+      editingCookieEntry &&
+        editingCookieEntry.profileId === profileId &&
+        editingCookieEntry.cookieIndex === cookieIndex
+    );
+  }
+
+  function startEditingCookieEntry(profileId, cookieIndex, cookie) {
+    editingLocalStorageEntry = null;
+    editingCookieEntry = {
+      profileId,
+      cookieIndex,
+      draftName: typeof cookie.name === "string" ? cookie.name : "",
+      draftValue: typeof cookie.value === "string" ? cookie.value : "",
+      draftPath: typeof cookie.path === "string" && cookie.path ? cookie.path : "/",
+      draftSameSite: getNormalizedCookieSameSiteValue(cookie.sameSite)
+    };
+    renderProfiles(allProfiles);
+  }
+
+  function cancelEditingCookieEntry() {
+    editingCookieEntry = null;
+    renderProfiles(allProfiles);
+  }
+
+  async function saveCookieEntry(profileId) {
+    if (!editingCookieEntry || editingCookieEntry.profileId !== profileId) {
+      return;
+    }
+
+    const profiles = await readProfilesFromStorage();
+    const profileIndex = profiles.findIndex((profile) => profile.id === profileId);
+
+    if (profileIndex === -1) {
+      throw new Error("Profile not found.");
+    }
+
+    const profile = profiles[profileIndex];
+    const cookies = getProfileCookies(profile);
+    const cookieToUpdate = cookies[editingCookieEntry.cookieIndex];
+
+    if (!cookieToUpdate) {
+      throw new Error("Cookie not found.");
+    }
+
+    const nextPath = editingCookieEntry.draftPath.trim() || "/";
+    const nextSameSite = getNormalizedCookieSameSiteValue(editingCookieEntry.draftSameSite);
+    const nextCookies = cookies.map((cookie, index) => {
+      if (index !== editingCookieEntry.cookieIndex) {
+        return cookie;
+      }
+
+      return {
+        ...cookie,
+        name: editingCookieEntry.draftName,
+        value: editingCookieEntry.draftValue,
+        path: nextPath,
+        sameSite: nextSameSite
+      };
+    });
+
+    const nextProfiles = [...profiles];
+    nextProfiles[profileIndex] = {
+      ...profile,
+      cookies: nextCookies
+    };
+
+    await writeProfilesToStorage(nextProfiles);
+    editingCookieEntry = null;
     renderProfiles(nextProfiles);
   }
 
@@ -1127,6 +1220,152 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  function createCookieEditor(profileId) {
+    const editor = document.createElement("div");
+    editor.className = "cookie-editor";
+
+    const fields = [
+      {
+        label: "Name",
+        type: "text",
+        value: editingCookieEntry ? editingCookieEntry.draftName : "",
+        onInput: (event) => {
+          if (editingCookieEntry) {
+            editingCookieEntry.draftName = event.target.value;
+          }
+        }
+      },
+      {
+        label: "Value",
+        type: "textarea",
+        value: editingCookieEntry ? editingCookieEntry.draftValue : "",
+        onInput: (event) => {
+          if (editingCookieEntry) {
+            editingCookieEntry.draftValue = event.target.value;
+          }
+        }
+      },
+      {
+        label: "Path",
+        type: "text",
+        value: editingCookieEntry ? editingCookieEntry.draftPath : "/",
+        onInput: (event) => {
+          if (editingCookieEntry) {
+            editingCookieEntry.draftPath = event.target.value;
+          }
+        }
+      }
+    ];
+
+    fields.forEach((field) => {
+      const fieldWrapper = document.createElement("label");
+      fieldWrapper.className = "cookie-editor__field";
+
+      const fieldLabel = document.createElement("span");
+      fieldLabel.className = "cookie-editor__label";
+      fieldLabel.textContent = field.label;
+
+      let input;
+
+      if (field.type === "textarea") {
+        input = document.createElement("textarea");
+        input.className = "cookie-editor__textarea";
+        input.rows = 3;
+      } else {
+        input = document.createElement("input");
+        input.type = "text";
+        input.className = "cookie-editor__input";
+      }
+
+      input.value = field.value;
+      input.disabled = Boolean(busyState);
+      input.addEventListener("input", field.onInput);
+      fieldWrapper.append(fieldLabel, input);
+      editor.appendChild(fieldWrapper);
+    });
+
+    const sameSiteField = document.createElement("label");
+    sameSiteField.className = "cookie-editor__field";
+
+    const sameSiteLabel = document.createElement("span");
+    sameSiteLabel.className = "cookie-editor__label";
+    sameSiteLabel.textContent = "SameSite";
+
+    const sameSiteSelect = document.createElement("select");
+    sameSiteSelect.className = "cookie-editor__select";
+    sameSiteSelect.disabled = Boolean(busyState);
+
+    [
+      ["unspecified", "Not set"],
+      ["lax", "Lax"],
+      ["strict", "Strict"],
+      ["no_restriction", "None"]
+    ].forEach(([value, label]) => {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = label;
+      option.selected = editingCookieEntry && editingCookieEntry.draftSameSite === value;
+      sameSiteSelect.appendChild(option);
+    });
+
+    sameSiteSelect.addEventListener("change", (event) => {
+      if (editingCookieEntry) {
+        editingCookieEntry.draftSameSite = event.target.value;
+      }
+    });
+
+    sameSiteField.append(sameSiteLabel, sameSiteSelect);
+    editor.appendChild(sameSiteField);
+
+    const readOnlyNote = document.createElement("p");
+    readOnlyNote.className = "cookie-editor__note";
+    readOnlyNote.textContent = "Domain, Secure, HttpOnly, and Expires stay read-only.";
+
+    const actions = document.createElement("div");
+    actions.className = "cookie-editor__actions";
+
+    const saveButton = createActionButton({
+      label: "Save",
+      busyLabel: "Saving...",
+      variantClass: "button--secondary button--compact",
+      isBusy: isProfileActionBusy("edit-cookie", profileId),
+      onClick: async () => {
+        await handleProfileAction({
+          profile: { id: profileId, profileName: "cookie" },
+          action: "edit-cookie",
+          beforeMessage: "Saving cookie changes...",
+          successMessage: "Cookie updated in saved profile",
+          failureMessage: "Failed to update cookie.",
+          run: () => saveCookieEntry(profileId)
+        });
+      }
+    });
+    saveButton.disabled = Boolean(busyState);
+
+    const cancelButton = createActionButton({
+      label: "Cancel",
+      busyLabel: "Cancel",
+      variantClass: "button--ghost button--compact",
+      isBusy: false,
+      onClick: () => cancelEditingCookieEntry()
+    });
+    cancelButton.disabled = Boolean(busyState);
+
+    actions.append(saveButton, cancelButton);
+    editor.append(readOnlyNote, actions);
+
+    window.setTimeout(() => {
+      const firstInput = editor.querySelector(".cookie-editor__input");
+
+      if (firstInput instanceof HTMLInputElement) {
+        firstInput.focus();
+        firstInput.setSelectionRange(firstInput.value.length, firstInput.value.length);
+      }
+    }, 0);
+
+    return editor;
+  }
+
   function createLocalStorageEditor(profileId) {
     const editor = document.createElement("div");
     editor.className = "local-storage-editor";
@@ -1238,7 +1477,7 @@ document.addEventListener("DOMContentLoaded", () => {
     header.append(title, count);
     section.appendChild(header);
 
-    const cookies = Array.isArray(profile.cookies) ? profile.cookies : [];
+    const cookies = getProfileCookies(profile);
 
     if (!cookies.length) {
       const emptyState = document.createElement("div");
@@ -1255,9 +1494,29 @@ document.addEventListener("DOMContentLoaded", () => {
       const item = document.createElement("article");
       item.className = "cookie-item";
 
+      const itemHeader = document.createElement("div");
+      itemHeader.className = "cookie-item__header";
+
       const itemTitle = document.createElement("h5");
       itemTitle.className = "cookie-item__title";
       itemTitle.textContent = cookie.name || "Unnamed cookie";
+
+      const editButton = createActionButton({
+        label: "Edit cookie",
+        busyLabel: "Edit cookie",
+        variantClass: "button--icon button--ghost button--icon-small",
+        isBusy: false,
+        iconName: "edit",
+        title: "Edit cookie",
+        onClick: () => startEditingCookieEntry(profile.id, cookieIndex, cookie)
+      });
+      editButton.disabled = Boolean(
+        busyState ||
+          editingLocalStorageEntry ||
+          (editingCookieEntry && !isEditingCookieEntry(profile.id, cookieIndex))
+      );
+
+      itemHeader.append(itemTitle, editButton);
 
       const itemMeta = document.createElement("div");
       itemMeta.className = "cookie-item__meta";
@@ -1271,17 +1530,21 @@ document.addEventListener("DOMContentLoaded", () => {
       httpOnlyBadge.textContent = cookie.httpOnly ? "HttpOnly" : "Readable";
 
       itemMeta.append(secureBadge, httpOnlyBadge);
-      item.append(itemTitle, itemMeta);
+      item.append(itemHeader, itemMeta);
 
-      item.append(
-        createCookieValueRow({ profileId: profile.id, cookie, cookieIndex }),
-        createCookieDetailRow("Domain", cookie.domain || profile.domain || "Unknown"),
-        createCookieDetailRow("Path", cookie.path || "/"),
-        createCookieDetailRow("Secure", cookie.secure ? "Yes" : "No"),
-        createCookieDetailRow("HttpOnly", cookie.httpOnly ? "Yes" : "No"),
-        createCookieDetailRow("SameSite", formatCookieSameSite(cookie.sameSite)),
-        createCookieDetailRow("Expires", formatCookieExpiration(cookie.expirationDate))
-      );
+      if (isEditingCookieEntry(profile.id, cookieIndex)) {
+        item.appendChild(createCookieEditor(profile.id));
+      } else {
+        item.append(
+          createCookieValueRow({ profileId: profile.id, cookie, cookieIndex }),
+          createCookieDetailRow("Domain", cookie.domain || profile.domain || "Unknown"),
+          createCookieDetailRow("Path", cookie.path || "/"),
+          createCookieDetailRow("Secure", cookie.secure ? "Yes" : "No"),
+          createCookieDetailRow("HttpOnly", cookie.httpOnly ? "Yes" : "No"),
+          createCookieDetailRow("SameSite", formatCookieSameSite(cookie.sameSite)),
+          createCookieDetailRow("Expires", formatCookieExpiration(cookie.expirationDate))
+        );
+      }
 
       list.appendChild(item);
     });
@@ -1350,6 +1613,7 @@ document.addEventListener("DOMContentLoaded", () => {
       });
       editButton.disabled = Boolean(
         busyState ||
+          editingCookieEntry ||
           (editingLocalStorageEntry &&
             !isEditingLocalStorageEntry(profile.id, entryKey))
       );
