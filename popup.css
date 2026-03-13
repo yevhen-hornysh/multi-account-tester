@@ -22,7 +22,7 @@
 
 html,
 body {
-  width: var(--popup-width);
+  width: min(100vw, var(--popup-width));
   margin: 0;
   font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
   background:
@@ -32,7 +32,7 @@ body {
 }
 
 .popup {
-  width: var(--popup-width);
+  width: min(100vw, var(--popup-width));
   min-height: var(--popup-min-height);
   padding: 16px;
   box-sizing: border-box;
@@ -202,6 +202,7 @@ body {
   background:
     linear-gradient(180deg, rgba(24, 199, 177, 0.04) 0%, rgba(24, 199, 177, 0) 100%),
     #f8fbfc;
+  overflow: hidden;
 }
 
 .profiles-list__empty {
@@ -350,8 +351,8 @@ body {
 .profile-details {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 4px;
+  gap: 10px;
+  padding: 2px;
 }
 
 .profile-details__title {
@@ -397,23 +398,67 @@ body {
   word-break: break-word;
 }
 
-.profile-details__section {
+.inspector-section {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(36, 48, 67, 0.08);
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgba(24, 199, 177, 0.03) 0%, rgba(255, 255, 255, 0) 100%),
+    #ffffff;
 }
 
-.profile-details__section-header {
+.inspector-section__header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
 }
 
-.profile-details__section-title {
+.inspector-section__title-group {
+  min-width: 0;
+}
+
+.inspector-section__title {
   margin: 0;
   font-size: 13px;
   font-weight: 700;
+}
+
+.inspector-section__description {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.inspector-section__controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.inspector-section__toggle {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--accent-dark);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.inspector-section__toggle:hover {
+  text-decoration: underline;
+}
+
+.inspector-section__body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .profile-details__section-count {
@@ -428,24 +473,43 @@ body {
   color: var(--text-secondary);
 }
 
-.cookie-empty-state {
-  padding: 16px 14px;
+.inspector-empty-state {
+  padding: 18px 16px;
   border: 1px dashed var(--panel-border);
   border-radius: 12px;
   background: #f8fbfc;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--text-secondary);
   text-align: center;
 }
 
-.cookie-list {
+.inspector-empty-state__title,
+.inspector-empty-state__description {
+  margin: 0;
+}
+
+.inspector-empty-state__title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.inspector-empty-state__description {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.inspector-list {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.inspector-list--scrollable {
   max-height: 300px;
   overflow-y: auto;
-  padding-right: 4px;
+  padding-right: 6px;
+  scrollbar-gutter: stable;
 }
 
 .cookie-item {
@@ -456,6 +520,13 @@ body {
   border: 1px solid rgba(36, 48, 67, 0.08);
   border-radius: 12px;
   background: #ffffff;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, background-color 0.16s ease;
+}
+
+.cookie-item--editing {
+  border-color: rgba(24, 199, 177, 0.55);
+  background: linear-gradient(180deg, rgba(24, 199, 177, 0.08) 0%, #ffffff 100%);
+  box-shadow: 0 0 0 3px rgba(24, 199, 177, 0.12);
 }
 
 .cookie-item__header {
@@ -565,6 +636,7 @@ body {
   padding: 10px;
   border-radius: 12px;
   background: #f6f9fb;
+  border: 1px solid rgba(24, 199, 177, 0.18);
 }
 
 .cookie-editor__field {
@@ -639,6 +711,7 @@ body {
   padding: 10px;
   border-radius: 12px;
   background: #f6f9fb;
+  border: 1px solid rgba(24, 199, 177, 0.18);
 }
 
 .local-storage-editor__field {
@@ -739,4 +812,38 @@ body {
   padding: 0;
   border-width: 0;
   box-shadow: none;
+}
+
+@media (max-width: 620px) {
+  :root {
+    --popup-min-height: 0;
+  }
+
+  .popup {
+    padding: 12px;
+    gap: 8px;
+  }
+
+  .panel {
+    padding: 10px;
+    border-radius: 14px;
+  }
+
+  .profile-card {
+    padding: 10px;
+  }
+
+  .profile-card__actions {
+    flex-wrap: wrap;
+  }
+
+  .button--secondary,
+  .button--ghost {
+    min-height: 34px;
+    padding: 8px 10px;
+  }
+
+  .inspector-list--scrollable {
+    max-height: 240px;
+  }
 }
