@@ -100,10 +100,29 @@ body {
   color: var(--text-secondary);
 }
 
-.field__input-row {
-  display: flex;
-  gap: 8px;
-  align-items: center;
+.field__label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.field__readonly-value {
+  min-height: 18px;
+  box-sizing: border-box;
+  border: 1px solid var(--input-border);
+  border-radius: 12px;
+  background: #f9fbfc;
+  padding: 11px 12px;
+  font-size: 14px;
+  color: var(--text-primary);
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.field__readonly-value--muted {
+  color: var(--text-secondary);
 }
 
 .field input {
