@@ -194,6 +194,10 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  function buildDomainMismatchMessage(profileDomain, activeTabHostname) {
+    return `Domain mismatch: saved for ${profileDomain}, active tab is ${activeTabHostname}.`;
+  }
+
   function validateProfileName(input) {
     const trimmedValue = input.trim();
 
@@ -366,6 +370,32 @@ document.addEventListener("DOMContentLoaded", () => {
     return normalizeCookieDomain(activeTabContext.hostname);
   }
 
+  async function captureCurrentSessionSnapshot({ expectedDomain = "" } = {}) {
+    const activeTab = await getCurrentActiveTab();
+    const activeTabContext = getActiveTabUrlContext(activeTab);
+    const normalizedDomain = normalizeCookieDomain(activeTabContext.hostname);
+    const cookieScopeDomain = expectedDomain || normalizedDomain;
+
+    if (expectedDomain && !domainsMatch(expectedDomain, normalizedDomain)) {
+      throw new Error(buildDomainMismatchMessage(expectedDomain, normalizedDomain));
+    }
+
+    const { cookies } = await readCookiesForProfileScope(
+      cookieScopeDomain,
+      activeTabContext.hostname
+    );
+    const localStorageEntries = await readLocalStorageFromActiveTab();
+    const sessionStorageEntries = await readSessionStorageFromActiveTab();
+
+    return {
+      activeTabContext,
+      normalizedDomain,
+      cookies,
+      localStorageEntries,
+      sessionStorageEntries
+    };
+  }
+
   function setCurrentDomainState(nextDomain, errorMessage = "") {
     currentDomain = nextDomain;
     currentDomainErrorMessage = errorMessage;
@@ -478,7 +508,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!domainsMatch(profile.domain, activeTabContext.hostname)) {
       return {
         canActivate: false,
-        message: `Domain mismatch: saved for ${profile.domain}, active tab is ${activeTabContext.hostname}.`,
+        message: buildDomainMismatchMessage(profile.domain, activeTabContext.hostname),
         type: "error"
       };
     }
@@ -859,13 +889,14 @@ document.addEventListener("DOMContentLoaded", () => {
     const cookieSummary = await restoreProfileCookies(profile, validation.activeTabContext.hostname);
 
     if (cookieSummary.failed > 0) {
-      console.error("Some cookies failed to restore", cookieSummary.failures);
-      throw new Error("Cookie restore incomplete.");
+      console.warn("Some cookies failed to restore", cookieSummary.failures);
     }
 
     await restoreProfileLocalStorage(profile, validation.activeTab);
     await restoreProfileSessionStorage(profile, validation.activeTab);
     await reloadTab(validation.activeTab.id);
+
+    return cookieSummary;
   }
 
   async function deleteProfile(profileId) {
@@ -875,6 +906,38 @@ document.addEventListener("DOMContentLoaded", () => {
     await writeProfilesToStorage(nextProfiles);
     allProfiles = nextProfiles;
     return nextProfiles;
+  }
+
+  async function refreshProfile(profileId) {
+    const profile = getProfileById(profileId);
+
+    if (!profile) {
+      throw new Error("Profile not found.");
+    }
+
+    const snapshot = await captureCurrentSessionSnapshot({
+      expectedDomain: profile.domain
+    });
+
+    setCurrentDomainState(snapshot.normalizedDomain, "");
+
+    const nextProfiles = await updateProfile(profileId, (currentProfile) => ({
+      ...currentProfile,
+      domain: snapshot.normalizedDomain,
+      savedAt: new Date().toISOString(),
+      cookies: snapshot.cookies,
+      localStorage: snapshot.localStorageEntries,
+      sessionStorage: snapshot.sessionStorageEntries,
+      activeTabUrl: snapshot.activeTabContext.url,
+      activeTabOrigin: snapshot.activeTabContext.origin
+    }));
+
+    renderProfiles(nextProfiles);
+
+    return {
+      cookies: snapshot.cookies.length,
+      localStorage: Object.keys(snapshot.localStorageEntries).length
+    };
   }
 
   function formatSavedAt(savedAt) {
@@ -888,6 +951,29 @@ document.addEventListener("DOMContentLoaded", () => {
       dateStyle: "medium",
       timeStyle: "short"
     }).format(parsedDate);
+  }
+
+  function formatCookieFailureSummary(failures) {
+    const failureList = Array.isArray(failures) ? failures : [];
+
+    if (!failureList.length) {
+      return "";
+    }
+
+    const uniqueNames = Array.from(
+      new Set(
+        failureList.map(({ cookieName }) => {
+          return cookieName && String(cookieName).trim() ? String(cookieName).trim() : "(unnamed)";
+        })
+      )
+    );
+    const preview = uniqueNames.slice(0, 3).join(", ");
+
+    if (uniqueNames.length <= 3) {
+      return preview;
+    }
+
+    return `${preview} and ${uniqueNames.length - 3} more`;
   }
 
   function getProfileCookieCount(profile) {
@@ -1025,6 +1111,11 @@ document.addEventListener("DOMContentLoaded", () => {
         "d",
         "M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z M12 15.25A3.25 3.25 0 1 0 12 8.75a3.25 3.25 0 0 0 0 6.5Z"
       );
+    } else if (iconName === "refresh") {
+      path.setAttribute(
+        "d",
+        "M20 11a8 8 0 1 0 2 5.3 M20 11v-6 M20 11h-6"
+      );
     } else if (iconName === "edit") {
       path.setAttribute(
         "d",
@@ -1078,6 +1169,8 @@ document.addEventListener("DOMContentLoaded", () => {
     action,
     beforeMessage,
     successMessage,
+    formatSuccessMessage,
+    successType = "success",
     failureMessage,
     run
   }) {
@@ -1093,8 +1186,12 @@ document.addEventListener("DOMContentLoaded", () => {
     showStatus(beforeMessage, "info");
 
     try {
-      await run();
-      showStatus(successMessage, "success");
+      const result = await run();
+      const nextSuccessMessage =
+        typeof formatSuccessMessage === "function"
+          ? formatSuccessMessage(result)
+          : successMessage;
+      showStatus(nextSuccessMessage, successType);
     } catch (error) {
       console.error(`${action} failed`, error);
       showStatus(error instanceof Error ? error.message : failureMessage, "error");
@@ -1887,6 +1984,26 @@ document.addEventListener("DOMContentLoaded", () => {
       });
       viewDetailsButton.disabled = Boolean(busyState);
 
+      const refreshButton = createActionButton({
+        label: "Update profile",
+        busyLabel: "Updating...",
+        variantClass: "button--icon button--ghost",
+        isBusy: isProfileActionBusy("refresh", profile.id),
+        iconName: "refresh",
+        title: "Update saved session from current tab",
+        onClick: async () => {
+          await handleProfileAction({
+            profile,
+            action: "refresh",
+            beforeMessage: `Updating ${profile.profileName}...`,
+            successMessage: "Profile updated successfully",
+            failureMessage: "Failed to update profile",
+            run: () => refreshProfile(profile.id)
+          });
+        }
+      });
+      refreshButton.disabled = Boolean(busyState);
+
       const activateButton = createActionButton({
         label: "Activate",
         busyLabel: "Activating...",
@@ -1898,6 +2015,17 @@ document.addEventListener("DOMContentLoaded", () => {
             action: "activate",
             beforeMessage: `Activating ${profile.profileName}...`,
             successMessage: "Session activated successfully",
+            formatSuccessMessage: (cookieSummary) => {
+              if (!cookieSummary || cookieSummary.failed <= 0) {
+                return "Session activated successfully";
+              }
+
+              const failedCookies = formatCookieFailureSummary(cookieSummary.failures);
+              return failedCookies
+                ? `Session activated. Some cookies were skipped: ${failedCookies}.`
+                : "Session activated. Some cookies were skipped.";
+            },
+            successType: "success",
             failureMessage: "Failed to activate session",
             run: () => activateProfile(profile)
           });
@@ -1930,7 +2058,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
       });
 
-      actions.append(viewDetailsButton, activateButton, deleteButton);
+      actions.append(viewDetailsButton, refreshButton, activateButton, deleteButton);
       profileCard.append(profileTopRow, profileMetaRow, actions);
       fragment.appendChild(profileCard);
     });
@@ -2025,27 +2153,19 @@ document.addEventListener("DOMContentLoaded", () => {
 
     try {
       const profileName = validateProfileName(profileNameInput.value);
-      const activeTab = await getCurrentActiveTab();
-      const activeTabContext = getActiveTabUrlContext(activeTab);
-      const normalizedDomain = normalizeCookieDomain(activeTabContext.hostname);
+      const snapshot = await captureCurrentSessionSnapshot();
+      const normalizedDomain = snapshot.normalizedDomain;
 
       setCurrentDomainState(normalizedDomain, "");
-
-      const { cookies } = await readCookiesForProfileScope(
-        normalizedDomain,
-        activeTabContext.hostname
-      );
-      const localStorageEntries = await readLocalStorageFromActiveTab();
-      const sessionStorageEntries = await readSessionStorageFromActiveTab();
       const profiles = await loadProfiles();
       const nextProfile = createProfile({
         profileName,
         domain: normalizedDomain,
-        cookies,
-        localStorageEntries,
-        sessionStorageEntries,
-        activeTabUrl: activeTabContext.url,
-        activeTabOrigin: activeTabContext.origin
+        cookies: snapshot.cookies,
+        localStorageEntries: snapshot.localStorageEntries,
+        sessionStorageEntries: snapshot.sessionStorageEntries,
+        activeTabUrl: snapshot.activeTabContext.url,
+        activeTabOrigin: snapshot.activeTabContext.origin
       });
 
       profiles.unshift(nextProfile);
