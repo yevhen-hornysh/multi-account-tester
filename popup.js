@@ -1,23 +1,22 @@
 document.addEventListener("DOMContentLoaded", () => {
   const profileNameInput = document.getElementById("profileName");
-  const domainInput = document.getElementById("domain");
-  const useCurrentSiteButton = document.getElementById("useCurrentSiteButton");
+  const currentSiteValue = document.getElementById("currentSiteValue");
   const saveSessionButton = document.getElementById("saveSessionButton");
   const profilesList = document.getElementById("profilesList");
   const statusMessage = document.getElementById("statusMessage");
 
   const STORAGE_KEY = "profiles";
   const PROFILE_NAME_REQUIRED_MESSAGE = "Profile name is required.";
-  const DOMAIN_REQUIRED_MESSAGE = "Domain is required.";
   const INVALID_DOMAIN_MESSAGE = "Enter a valid domain.";
   const UNSUPPORTED_PAGE_MESSAGE = "Open an http:// or https:// page to use this extension.";
-  const DOMAIN_CONTEXT_MISMATCH_MESSAGE =
-    "The entered domain must match the current site or one of its parent domains.";
+  const CURRENT_SITE_UNAVAILABLE_MESSAGE = "Current site unavailable.";
 
   let statusTimeoutId;
   let allProfiles = [];
   let currentProfiles = [];
   let busyState = null;
+  let currentDomain = "";
+  let currentDomainErrorMessage = "";
 
   function showStatus(message, type = "info") {
     window.clearTimeout(statusTimeoutId);
@@ -42,12 +41,10 @@ document.addEventListener("DOMContentLoaded", () => {
   function applyBusyState() {
     const isBusy = Boolean(busyState);
 
-    saveSessionButton.disabled = isBusy;
-    useCurrentSiteButton.disabled = isBusy;
+    saveSessionButton.disabled = isBusy || !currentDomain;
     saveSessionButton.textContent =
       busyState && busyState.scope === "save" ? "Saving..." : "Save current session";
     profileNameInput.disabled = isBusy;
-    domainInput.disabled = isBusy;
     renderProfiles(allProfiles);
   }
 
@@ -106,7 +103,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const trimmedValue = input.trim().toLowerCase();
 
     if (!trimmedValue) {
-      throw new Error(DOMAIN_REQUIRED_MESSAGE);
+      throw new Error(CURRENT_SITE_UNAVAILABLE_MESSAGE);
     }
 
     const candidateValue = /^[a-z]+:\/\//i.test(trimmedValue)
@@ -264,16 +261,33 @@ document.addEventListener("DOMContentLoaded", () => {
     return normalizeCookieDomain(activeTabContext.hostname);
   }
 
-  async function fillDomainFromCurrentSite({ showFeedback = false } = {}) {
-    const currentHostname = await getCurrentSiteHostname();
-    domainInput.value = currentHostname;
+  function setCurrentDomainState(nextDomain, errorMessage = "") {
+    currentDomain = nextDomain;
+    currentDomainErrorMessage = errorMessage;
+    currentSiteValue.textContent = nextDomain || errorMessage || "Current site unavailable.";
+    currentSiteValue.className = nextDomain
+      ? "field__readonly-value"
+      : "field__readonly-value field__readonly-value--muted";
     renderProfiles(allProfiles);
+  }
 
-    if (showFeedback) {
-      showStatus(`Using ${currentHostname}`, "success");
+  async function refreshCurrentDomain({ showError = false } = {}) {
+    try {
+      const detectedDomain = await getCurrentSiteHostname();
+      setCurrentDomainState(detectedDomain, "");
+      return detectedDomain;
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Could not read the current site domain.";
+
+      setCurrentDomainState("", message);
+
+      if (showError) {
+        showStatus(message, "error");
+      }
+
+      return "";
     }
-
-    return currentHostname;
   }
 
   function domainsMatch(savedProfileDomain, activeTabHostname) {
@@ -844,12 +858,30 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function renderProfiles(profiles) {
     allProfiles = Array.isArray(profiles) ? profiles : [];
-    currentProfiles = filterProfilesByDomain(allProfiles, domainInput.value);
+    currentProfiles = filterProfilesByDomain(allProfiles, currentDomain);
     profilesList.textContent = "";
+
+    if (!currentDomain) {
+      const emptyState = document.createElement("div");
+      emptyState.className = "profiles-list__empty";
+
+      const emptyTitle = document.createElement("p");
+      emptyTitle.className = "profiles-list__empty-title";
+      emptyTitle.textContent = "Current site unavailable";
+
+      const emptyHint = document.createElement("p");
+      emptyHint.className = "profiles-list__empty-hint";
+      emptyHint.textContent =
+        currentDomainErrorMessage || "Open an http:// or https:// page to view saved profiles.";
+
+      emptyState.append(emptyTitle, emptyHint);
+      profilesList.appendChild(emptyState);
+      return;
+    }
 
     if (!currentProfiles.length) {
       renderEmptyProfilesState({
-        hasDomainFilter: Boolean(normalizeDomainForComparison(domainInput.value))
+        hasDomainFilter: Boolean(normalizeDomainForComparison(currentDomain))
       });
       return;
     }
@@ -935,18 +967,14 @@ document.addEventListener("DOMContentLoaded", () => {
   async function initializePopup() {
     try {
       const profiles = await readProfilesFromStorage();
-      renderProfiles(profiles);
+      allProfiles = profiles;
     } catch (error) {
       console.error("Failed to load profiles", error);
-      renderProfiles([]);
+      allProfiles = [];
       showStatus("Failed to load saved profiles.", "error");
     }
 
-    try {
-      await fillDomainFromCurrentSite();
-    } catch (error) {
-      console.debug("Could not auto-fill domain from active tab", error);
-    }
+    await refreshCurrentDomain();
   }
 
   /**
@@ -982,15 +1010,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (error.message === PROFILE_NAME_REQUIRED_MESSAGE) {
       profileNameInput.focus();
-      return;
-    }
-
-    if (
-      error.message === DOMAIN_REQUIRED_MESSAGE ||
-      error.message === INVALID_DOMAIN_MESSAGE ||
-      error.message === DOMAIN_CONTEXT_MISMATCH_MESSAGE
-    ) {
-      domainInput.focus();
     }
   }
 
@@ -1006,11 +1025,9 @@ document.addEventListener("DOMContentLoaded", () => {
       const profileName = validateProfileName(profileNameInput.value);
       const activeTab = await getCurrentActiveTab();
       const activeTabContext = getActiveTabUrlContext(activeTab);
-      const normalizedDomain = normalizeCookieDomain(domainInput.value);
+      const normalizedDomain = normalizeCookieDomain(activeTabContext.hostname);
 
-      if (!domainsMatch(normalizedDomain, activeTabContext.hostname)) {
-        throw new Error(DOMAIN_CONTEXT_MISMATCH_MESSAGE);
-      }
+      setCurrentDomainState(normalizedDomain, "");
 
       const { cookies } = await readCookiesForProfileScope(
         normalizedDomain,
@@ -1035,13 +1052,6 @@ document.addEventListener("DOMContentLoaded", () => {
       showStatus("Session saved successfully", "success");
 
       profileNameInput.value = "";
-
-      try {
-        await fillDomainFromCurrentSite();
-      } catch (error) {
-        domainInput.value = "";
-      }
-
       profileNameInput.focus();
     } catch (error) {
       console.error("Failed to save session", error);
@@ -1050,30 +1060,6 @@ document.addEventListener("DOMContentLoaded", () => {
     } finally {
       setBusyState(null);
     }
-  });
-
-  useCurrentSiteButton.addEventListener("click", async () => {
-    if (busyState) {
-      return;
-    }
-
-    try {
-      await fillDomainFromCurrentSite({ showFeedback: true });
-    } catch (error) {
-      console.error("Failed to use current site", error);
-      showStatus(
-        error instanceof Error ? error.message : "Could not read the current site domain.",
-        "error"
-      );
-    }
-  });
-
-  domainInput.addEventListener("input", () => {
-    if (busyState) {
-      return;
-    }
-
-    renderProfiles(allProfiles);
   });
 
   initializePopup();
