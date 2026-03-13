@@ -20,6 +20,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let currentView = "list";
   let selectedProfileId = "";
   let expandedValueRows = new Set();
+  let inspectorSectionStates = new Map();
   let editingLocalStorageEntry = null;
   let editingCookieEntry = null;
 
@@ -62,6 +63,7 @@ document.addEventListener("DOMContentLoaded", () => {
     currentView = view;
     selectedProfileId = profileId;
     expandedValueRows = new Set();
+    inspectorSectionStates = new Map();
     editingLocalStorageEntry = null;
     editingCookieEntry = null;
     renderProfiles(allProfiles);
@@ -1154,6 +1156,123 @@ document.addEventListener("DOMContentLoaded", () => {
     return detailsItem;
   }
 
+  function getInspectorSectionKey(profileId, sectionName) {
+    return `${profileId}:section:${sectionName}`;
+  }
+
+  function isInspectorSectionCollapsed(profileId, sectionName, defaultCollapsed = false) {
+    const sectionKey = getInspectorSectionKey(profileId, sectionName);
+
+    if (!inspectorSectionStates.has(sectionKey)) {
+      return defaultCollapsed;
+    }
+
+    return inspectorSectionStates.get(sectionKey) === true;
+  }
+
+  function toggleInspectorSection(profileId, sectionName, defaultCollapsed = false) {
+    const sectionKey = getInspectorSectionKey(profileId, sectionName);
+    const currentState = isInspectorSectionCollapsed(profileId, sectionName, defaultCollapsed);
+    inspectorSectionStates.set(sectionKey, !currentState);
+
+    renderProfiles(allProfiles);
+  }
+
+  function createSectionEmptyState({ title, description }) {
+    const emptyState = document.createElement("div");
+    emptyState.className = "inspector-empty-state";
+
+    const emptyStateTitle = document.createElement("p");
+    emptyStateTitle.className = "inspector-empty-state__title";
+    emptyStateTitle.textContent = title;
+
+    const emptyStateDescription = document.createElement("p");
+    emptyStateDescription.className = "inspector-empty-state__description";
+    emptyStateDescription.textContent = description;
+
+    emptyState.append(emptyStateTitle, emptyStateDescription);
+    return emptyState;
+  }
+
+  function createInspectorSection({
+    profileId,
+    sectionName,
+    title,
+    description = "",
+    countText = "",
+    isCollapsible = false,
+    defaultCollapsed = false,
+    content
+  }) {
+    const section = document.createElement("section");
+    section.className = "inspector-section";
+
+    const header = document.createElement("div");
+    header.className = "inspector-section__header";
+
+    const titleGroup = document.createElement("div");
+    titleGroup.className = "inspector-section__title-group";
+
+    const heading = document.createElement("h4");
+    heading.className = "inspector-section__title";
+    heading.textContent = title;
+
+    titleGroup.appendChild(heading);
+
+    if (description) {
+      const subtitle = document.createElement("p");
+      subtitle.className = "inspector-section__description";
+      subtitle.textContent = description;
+      titleGroup.appendChild(subtitle);
+    }
+
+    header.appendChild(titleGroup);
+
+    const controls = document.createElement("div");
+    controls.className = "inspector-section__controls";
+
+    if (countText) {
+      const count = document.createElement("span");
+      count.className = "profile-details__section-count";
+      count.textContent = countText;
+      controls.appendChild(count);
+    }
+
+    const isCollapsed = isCollapsible
+      ? isInspectorSectionCollapsed(profileId, sectionName, defaultCollapsed)
+      : false;
+
+    if (isCollapsible) {
+      const toggleButton = document.createElement("button");
+      toggleButton.type = "button";
+      toggleButton.className = "inspector-section__toggle";
+      toggleButton.textContent = isCollapsed ? "Expand" : "Collapse";
+      toggleButton.setAttribute("aria-expanded", String(!isCollapsed));
+      toggleButton.addEventListener("click", () =>
+        toggleInspectorSection(profileId, sectionName, defaultCollapsed)
+      );
+      controls.appendChild(toggleButton);
+    }
+
+    if (controls.childNodes.length) {
+      header.appendChild(controls);
+    }
+
+    const body = document.createElement("div");
+    body.className = "inspector-section__body";
+
+    if (isCollapsed) {
+      body.hidden = true;
+    }
+
+    if (content) {
+      body.appendChild(content);
+    }
+
+    section.append(header, body);
+    return section;
+  }
+
   function formatCookieExpiration(expirationDate) {
     if (typeof expirationDate !== "number" || Number.isNaN(expirationDate)) {
       return "Session cookie";
@@ -1481,39 +1600,30 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function renderCookiesSection(profile) {
-    const section = document.createElement("section");
-    section.className = "profile-details__section";
-
-    const header = document.createElement("div");
-    header.className = "profile-details__section-header";
-
-    const title = document.createElement("h4");
-    title.className = "profile-details__section-title";
-    title.textContent = "Cookies";
-
-    const count = document.createElement("span");
-    count.className = "profile-details__section-count";
-    count.textContent = `${getProfileCookieCount(profile)} saved`;
-
-    header.append(title, count);
-    section.appendChild(header);
-
     const cookies = getProfileCookies(profile);
 
     if (!cookies.length) {
-      const emptyState = document.createElement("div");
-      emptyState.className = "cookie-empty-state";
-      emptyState.textContent = "No cookies were saved for this profile.";
-      section.appendChild(emptyState);
-      return section;
+      return createInspectorSection({
+        profileId: profile.id,
+        sectionName: "cookies",
+        title: "Cookies",
+        description: "Saved authentication and preference cookies for this profile.",
+        countText: "0 saved",
+        content: createSectionEmptyState({
+          title: "No cookies saved",
+          description: "Save a session after signing in to capture cookies for this site."
+        })
+      });
     }
 
     const list = document.createElement("div");
-    list.className = "cookie-list";
+    list.className = "inspector-list inspector-list--scrollable";
 
     cookies.forEach((cookie, cookieIndex) => {
       const item = document.createElement("article");
-      item.className = "cookie-item";
+      item.className = `cookie-item${
+        isEditingCookieEntry(profile.id, cookieIndex) ? " cookie-item--editing" : ""
+      }`;
 
       const itemHeader = document.createElement("div");
       itemHeader.className = "cookie-item__header";
@@ -1570,44 +1680,43 @@ document.addEventListener("DOMContentLoaded", () => {
       list.appendChild(item);
     });
 
-    section.appendChild(list);
-    return section;
+    return createInspectorSection({
+      profileId: profile.id,
+      sectionName: "cookies",
+      title: "Cookies",
+      description: "Saved authentication and preference cookies for this profile.",
+      countText: `${cookies.length} saved`,
+      isCollapsible: cookies.length > 4,
+      defaultCollapsed: cookies.length > 8,
+      content: list
+    });
   }
 
   function renderLocalStorageSection(profile) {
-    const section = document.createElement("section");
-    section.className = "profile-details__section";
-
-    const header = document.createElement("div");
-    header.className = "profile-details__section-header";
-
-    const title = document.createElement("h4");
-    title.className = "profile-details__section-title";
-    title.textContent = "Local Storage";
-
-    const count = document.createElement("span");
-    count.className = "profile-details__section-count";
-    count.textContent = `${getProfileLocalStorageCount(profile)} saved`;
-
-    header.append(title, count);
-    section.appendChild(header);
-
     const entries = getProfileLocalStorageEntries(profile);
 
     if (!entries.length) {
-      const emptyState = document.createElement("div");
-      emptyState.className = "cookie-empty-state";
-      emptyState.textContent = "No localStorage entries were saved for this profile.";
-      section.appendChild(emptyState);
-      return section;
+      return createInspectorSection({
+        profileId: profile.id,
+        sectionName: "local-storage",
+        title: "LocalStorage",
+        description: "Saved per-origin values captured from the active tab.",
+        countText: "0 saved",
+        content: createSectionEmptyState({
+          title: "No localStorage saved",
+          description: "This profile did not capture any localStorage entries for the current origin."
+        })
+      });
     }
 
     const list = document.createElement("div");
-    list.className = "cookie-list";
+    list.className = "inspector-list inspector-list--scrollable";
 
     entries.forEach(([entryKey, entryValue], entryIndex) => {
       const item = document.createElement("article");
-      item.className = "cookie-item";
+      item.className = `cookie-item${
+        isEditingLocalStorageEntry(profile.id, entryKey) ? " cookie-item--editing" : ""
+      }`;
 
       const keyRow = document.createElement("div");
       keyRow.className = "cookie-item__row";
@@ -1658,8 +1767,16 @@ document.addEventListener("DOMContentLoaded", () => {
       list.appendChild(item);
     });
 
-    section.appendChild(list);
-    return section;
+    return createInspectorSection({
+      profileId: profile.id,
+      sectionName: "local-storage",
+      title: "LocalStorage",
+      description: "Saved per-origin values captured from the active tab.",
+      countText: `${entries.length} saved`,
+      isCollapsible: entries.length > 4,
+      defaultCollapsed: entries.length > 8,
+      content: list
+    });
   }
 
   function renderProfileDetailsView(profile) {
@@ -1693,11 +1810,20 @@ document.addEventListener("DOMContentLoaded", () => {
       createDetailsItem("localStorage", String(getProfileLocalStorageCount(profile)))
     );
 
+    const profileInfoSection = createInspectorSection({
+      profileId: profile.id,
+      sectionName: "profile-info",
+      title: "Profile Info",
+      description: "Snapshot metadata and storage counts for this saved session.",
+      countText: "Overview",
+      content: grid
+    });
+
     detailsView.append(
       backButton,
       title,
       subtitle,
-      grid,
+      profileInfoSection,
       renderCookiesSection(profile),
       renderLocalStorageSection(profile)
     );
