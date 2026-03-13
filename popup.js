@@ -103,6 +103,95 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  async function loadProfiles() {
+    const profiles = await readProfilesFromStorage();
+    allProfiles = profiles;
+    return profiles;
+  }
+
+  function getProfileById(profileId, profiles = allProfiles) {
+    const profileList = Array.isArray(profiles) ? profiles : [];
+    return profileList.find((profile) => profile.id === profileId) || null;
+  }
+
+  async function updateProfile(profileId, updater) {
+    const profiles = await loadProfiles();
+    const profileIndex = profiles.findIndex((profile) => profile.id === profileId);
+
+    if (profileIndex === -1) {
+      throw new Error("Profile not found.");
+    }
+
+    const currentProfile = profiles[profileIndex];
+    const nextProfile = await updater(currentProfile);
+    const nextProfiles = [...profiles];
+    nextProfiles[profileIndex] = nextProfile;
+
+    await writeProfilesToStorage(nextProfiles);
+    allProfiles = nextProfiles;
+    return nextProfiles;
+  }
+
+  async function updateCookieInProfile(profileId, cookieIndex, updates) {
+    return updateProfile(profileId, (profile) => {
+      const cookies = getProfileCookies(profile);
+      const cookieToUpdate = cookies[cookieIndex];
+
+      if (!cookieToUpdate) {
+        throw new Error("Cookie not found.");
+      }
+
+      return {
+        ...profile,
+        cookies: cookies.map((cookie, index) => {
+          if (index !== cookieIndex) {
+            return cookie;
+          }
+
+          return {
+            ...cookie,
+            ...updates
+          };
+        })
+      };
+    });
+  }
+
+  async function updateLocalStorageEntry(profileId, { originalKey, nextKey, nextValue }) {
+    return updateProfile(profileId, (profile) => {
+      const currentEntries = getProfileLocalStorageEntries(profile);
+      const hasDuplicateKey = currentEntries.some(([existingKey]) => {
+        return existingKey === nextKey && existingKey !== originalKey;
+      });
+
+      if (hasDuplicateKey) {
+        throw new Error("A localStorage entry with this key already exists.");
+      }
+
+      const existingEntry = currentEntries.find(([existingKey]) => existingKey === originalKey);
+
+      if (!existingEntry) {
+        throw new Error("LocalStorage entry not found.");
+      }
+
+      const localStorage = {};
+
+      currentEntries.forEach(([existingKey, existingValue]) => {
+        if (existingKey === originalKey) {
+          localStorage[nextKey] = nextValue;
+          return;
+        }
+
+        localStorage[existingKey] = existingValue;
+      });
+
+      return {
+        ...profile,
+        localStorage
+      };
+    });
+  }
+
   function validateProfileName(input) {
     const trimmedValue = input.trim();
 
@@ -778,10 +867,11 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   async function deleteProfile(profileId) {
-    const profiles = await readProfilesFromStorage();
+    const profiles = await loadProfiles();
     const nextProfiles = profiles.filter((profile) => profile.id !== profileId);
 
     await writeProfilesToStorage(nextProfiles);
+    allProfiles = nextProfiles;
     return nextProfiles;
   }
 
@@ -850,46 +940,11 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!editingLocalStorageEntry || editingLocalStorageEntry.profileId !== profileId) {
       return;
     }
-
-    const profiles = await readProfilesFromStorage();
-    const profileIndex = profiles.findIndex((profile) => profile.id === profileId);
-
-    if (profileIndex === -1) {
-      throw new Error("Profile not found.");
-    }
-
-    const profile = profiles[profileIndex];
-    const currentEntries = getProfileLocalStorageEntries(profile);
-    const nextKey = editingLocalStorageEntry.draftKey;
-    const nextValue = editingLocalStorageEntry.draftValue;
-    const hasDuplicateKey = currentEntries.some(([existingKey]) => {
-      return (
-        existingKey === nextKey && existingKey !== editingLocalStorageEntry.originalKey
-      );
+    const nextProfiles = await updateLocalStorageEntry(profileId, {
+      originalKey: editingLocalStorageEntry.originalKey,
+      nextKey: editingLocalStorageEntry.draftKey,
+      nextValue: editingLocalStorageEntry.draftValue
     });
-
-    if (hasDuplicateKey) {
-      throw new Error("A localStorage entry with this key already exists.");
-    }
-
-    const nextLocalStorage = {};
-
-    currentEntries.forEach(([existingKey, existingValue]) => {
-      if (existingKey === editingLocalStorageEntry.originalKey) {
-        nextLocalStorage[nextKey] = nextValue;
-        return;
-      }
-
-      nextLocalStorage[existingKey] = existingValue;
-    });
-
-    const nextProfiles = [...profiles];
-    nextProfiles[profileIndex] = {
-      ...profile,
-      localStorage: nextLocalStorage
-    };
-
-    await writeProfilesToStorage(nextProfiles);
     editingLocalStorageEntry = null;
     renderProfiles(nextProfiles);
   }
@@ -938,50 +993,16 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    const profiles = await readProfilesFromStorage();
-    const profileIndex = profiles.findIndex((profile) => profile.id === profileId);
-
-    if (profileIndex === -1) {
-      throw new Error("Profile not found.");
-    }
-
-    const profile = profiles[profileIndex];
-    const cookies = getProfileCookies(profile);
-    const cookieToUpdate = cookies[editingCookieEntry.cookieIndex];
-
-    if (!cookieToUpdate) {
-      throw new Error("Cookie not found.");
-    }
-
     const nextPath = editingCookieEntry.draftPath.trim() || "/";
     const nextSameSite = getNormalizedCookieSameSiteValue(editingCookieEntry.draftSameSite);
-    const nextCookies = cookies.map((cookie, index) => {
-      if (index !== editingCookieEntry.cookieIndex) {
-        return cookie;
-      }
-
-      return {
-        ...cookie,
-        name: editingCookieEntry.draftName,
-        value: editingCookieEntry.draftValue,
-        path: nextPath,
-        sameSite: nextSameSite
-      };
+    const nextProfiles = await updateCookieInProfile(profileId, editingCookieEntry.cookieIndex, {
+      name: editingCookieEntry.draftName,
+      value: editingCookieEntry.draftValue,
+      path: nextPath,
+      sameSite: nextSameSite
     });
-
-    const nextProfiles = [...profiles];
-    nextProfiles[profileIndex] = {
-      ...profile,
-      cookies: nextCookies
-    };
-
-    await writeProfilesToStorage(nextProfiles);
     editingCookieEntry = null;
     renderProfiles(nextProfiles);
-  }
-
-  function findProfileById(profileId) {
-    return allProfiles.find((profile) => profile.id === profileId) || null;
   }
 
   function createIcon(iconName) {
@@ -1804,7 +1825,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     if (currentView === "details") {
-      const selectedProfile = findProfileById(selectedProfileId);
+      const selectedProfile = getProfileById(selectedProfileId);
 
       if (!selectedProfile || !isDomainFilterMatch(selectedProfile.domain, currentDomain)) {
         currentView = "list";
@@ -1822,8 +1843,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   async function initializePopup() {
     try {
-      const profiles = await readProfilesFromStorage();
-      allProfiles = profiles;
+      await loadProfiles();
     } catch (error) {
       console.error("Failed to load profiles", error);
       allProfiles = [];
@@ -1891,7 +1911,7 @@ document.addEventListener("DOMContentLoaded", () => {
       );
       const localStorageEntries = await readLocalStorageFromActiveTab();
       const sessionStorageEntries = await readSessionStorageFromActiveTab();
-      const profiles = await readProfilesFromStorage();
+      const profiles = await loadProfiles();
       const nextProfile = createProfile({
         profileName,
         domain: normalizedDomain,
