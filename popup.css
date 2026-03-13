@@ -1,6 +1,7 @@
 :root {
   color-scheme: light;
-  --popup-width: 360px;
+  --popup-width: 560px;
+  --popup-min-height: 620px;
   --bg: #eef2f5;
   --panel-bg: #ffffff;
   --panel-border: #d8e0e8;
@@ -19,7 +20,9 @@
   --shadow: 0 12px 28px rgba(36, 48, 67, 0.08);
 }
 
+html,
 body {
+  width: var(--popup-width);
   margin: 0;
   font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
   background:
@@ -30,11 +33,12 @@ body {
 
 .popup {
   width: var(--popup-width);
-  padding: 18px;
+  min-height: var(--popup-min-height);
+  padding: 16px;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
 .popup__header {
@@ -52,7 +56,7 @@ body {
 
 .popup__header h1 {
   margin: 4px 0 6px;
-  font-size: 22px;
+  font-size: 21px;
   line-height: 1.15;
 }
 
@@ -64,7 +68,7 @@ body {
 }
 
 .panel {
-  padding: 14px;
+  padding: 12px;
   background: var(--panel-bg);
   border: 1px solid var(--panel-border);
   border-radius: 16px;
@@ -89,7 +93,7 @@ body {
 }
 
 .field {
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
 .field label {
@@ -114,7 +118,7 @@ body {
   border: 1px solid var(--input-border);
   border-radius: 12px;
   background: #f9fbfc;
-  padding: 11px 12px;
+  padding: 10px 12px;
   font-size: 14px;
   color: var(--text-primary);
   line-height: 1.4;
@@ -131,7 +135,7 @@ body {
   border: 1px solid var(--input-border);
   border-radius: 12px;
   background: #f9fbfc;
-  padding: 11px 12px;
+  padding: 10px 12px;
   font-size: 14px;
   color: var(--text-primary);
   outline: none;
@@ -158,7 +162,7 @@ body {
   width: 100%;
   border: 0;
   border-radius: 999px;
-  padding: 12px 16px;
+  padding: 11px 16px;
   font-size: 14px;
   font-weight: 700;
   cursor: pointer;
@@ -190,10 +194,10 @@ body {
   min-height: 120px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   border: 1px dashed var(--panel-border);
   border-radius: 14px;
-  padding: 10px;
+  padding: 8px;
   box-sizing: border-box;
   background:
     linear-gradient(180deg, rgba(24, 199, 177, 0.04) 0%, rgba(24, 199, 177, 0) 100%),
@@ -224,53 +228,78 @@ body {
 }
 
 .profile-card {
-  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
   border: 1px solid rgba(36, 48, 67, 0.08);
-  border-radius: 12px;
+  border-radius: 14px;
   background: #ffffff;
 }
 
-.profile-card__header {
-  margin-bottom: 8px;
+.profile-card__top-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
 }
 
 .profile-card__title {
-  margin: 0 0 4px;
+  margin: 0;
   font-size: 14px;
   line-height: 1.3;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .profile-card__domain {
   margin: 0;
   font-size: 12px;
   color: var(--text-secondary);
-  word-break: break-word;
+  flex: 0 1 48%;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: right;
 }
 
-.profile-card__meta {
-  margin: 0 0 10px;
-  font-size: 12px;
+.profile-card__meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.profile-card__meta-item {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #f3f7fa;
+  font-size: 11px;
+  font-weight: 600;
   color: var(--text-secondary);
 }
 
 .profile-card__actions {
   display: flex;
-  gap: 8px;
-  align-items: stretch;
-  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
 }
 
 .button--secondary,
 .button--ghost {
   width: auto;
-  flex: 1;
-  min-height: 40px;
-  padding: 10px 12px;
+  min-height: 36px;
+  padding: 9px 12px;
   font-size: 13px;
   box-shadow: none;
 }
 
 .button--secondary {
+  flex: 1 1 auto;
   background: rgba(24, 199, 177, 0.12);
   color: var(--accent-dark);
 }
@@ -286,6 +315,22 @@ body {
   min-width: 112px;
   padding: 11px 12px;
   white-space: nowrap;
+}
+
+.button--icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 36px;
+  width: 36px;
+  min-width: 36px;
+  padding: 0;
+  border-radius: 10px;
+}
+
+.button__icon {
+  width: 16px;
+  height: 16px;
 }
 
 .profile-details {
