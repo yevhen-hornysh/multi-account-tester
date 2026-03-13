@@ -20,6 +20,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let currentView = "list";
   let selectedProfileId = "";
   let expandedValueRows = new Set();
+  let editingLocalStorageEntry = null;
 
   function showStatus(message, type = "info") {
     window.clearTimeout(statusTimeoutId);
@@ -60,6 +61,7 @@ document.addEventListener("DOMContentLoaded", () => {
     currentView = view;
     selectedProfileId = profileId;
     expandedValueRows = new Set();
+    editingLocalStorageEntry = null;
     renderProfiles(allProfiles);
   }
 
@@ -814,6 +816,77 @@ document.addEventListener("DOMContentLoaded", () => {
     return Object.entries(profile.localStorage);
   }
 
+  function isEditingLocalStorageEntry(profileId, entryKey) {
+    return Boolean(
+      editingLocalStorageEntry &&
+        editingLocalStorageEntry.profileId === profileId &&
+        editingLocalStorageEntry.originalKey === entryKey
+    );
+  }
+
+  function startEditingLocalStorageEntry(profileId, entryKey, entryValue) {
+    editingLocalStorageEntry = {
+      profileId,
+      originalKey: entryKey,
+      draftKey: entryKey,
+      draftValue: typeof entryValue === "string" ? entryValue : entryValue === null ? "null" : ""
+    };
+    renderProfiles(allProfiles);
+  }
+
+  function cancelEditingLocalStorageEntry() {
+    editingLocalStorageEntry = null;
+    renderProfiles(allProfiles);
+  }
+
+  async function saveLocalStorageEntry(profileId) {
+    if (!editingLocalStorageEntry || editingLocalStorageEntry.profileId !== profileId) {
+      return;
+    }
+
+    const profiles = await readProfilesFromStorage();
+    const profileIndex = profiles.findIndex((profile) => profile.id === profileId);
+
+    if (profileIndex === -1) {
+      throw new Error("Profile not found.");
+    }
+
+    const profile = profiles[profileIndex];
+    const currentEntries = getProfileLocalStorageEntries(profile);
+    const nextKey = editingLocalStorageEntry.draftKey;
+    const nextValue = editingLocalStorageEntry.draftValue;
+    const hasDuplicateKey = currentEntries.some(([existingKey]) => {
+      return (
+        existingKey === nextKey && existingKey !== editingLocalStorageEntry.originalKey
+      );
+    });
+
+    if (hasDuplicateKey) {
+      throw new Error("A localStorage entry with this key already exists.");
+    }
+
+    const nextLocalStorage = {};
+
+    currentEntries.forEach(([existingKey, existingValue]) => {
+      if (existingKey === editingLocalStorageEntry.originalKey) {
+        nextLocalStorage[nextKey] = nextValue;
+        return;
+      }
+
+      nextLocalStorage[existingKey] = existingValue;
+    });
+
+    const nextProfiles = [...profiles];
+    nextProfiles[profileIndex] = {
+      ...profile,
+      localStorage: nextLocalStorage
+    };
+
+    await writeProfilesToStorage(nextProfiles);
+    editingLocalStorageEntry = null;
+    renderProfiles(nextProfiles);
+  }
+
   function findProfileById(profileId) {
     return allProfiles.find((profile) => profile.id === profileId) || null;
   }
@@ -835,6 +908,11 @@ document.addEventListener("DOMContentLoaded", () => {
       path.setAttribute(
         "d",
         "M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z M12 15.25A3.25 3.25 0 1 0 12 8.75a3.25 3.25 0 0 0 0 6.5Z"
+      );
+    } else if (iconName === "edit") {
+      path.setAttribute(
+        "d",
+        "M12 20h9 M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5Z"
       );
     } else {
       path.setAttribute(
@@ -903,7 +981,7 @@ document.addEventListener("DOMContentLoaded", () => {
       showStatus(successMessage, "success");
     } catch (error) {
       console.error(`${action} failed`, error);
-      showStatus(failureMessage, "error");
+      showStatus(error instanceof Error ? error.message : failureMessage, "error");
     } finally {
       setBusyState(null);
     }
@@ -1049,6 +1127,99 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  function createLocalStorageEditor(profileId) {
+    const editor = document.createElement("div");
+    editor.className = "local-storage-editor";
+
+    const keyField = document.createElement("label");
+    keyField.className = "local-storage-editor__field";
+
+    const keyLabel = document.createElement("span");
+    keyLabel.className = "local-storage-editor__label";
+    keyLabel.textContent = "Key";
+
+    const keyInput = document.createElement("input");
+    keyInput.type = "text";
+    keyInput.className = "local-storage-editor__input";
+    keyInput.value = editingLocalStorageEntry ? editingLocalStorageEntry.draftKey : "";
+    keyInput.disabled = Boolean(busyState);
+    keyInput.addEventListener("input", (event) => {
+      if (!editingLocalStorageEntry) {
+        return;
+      }
+
+      editingLocalStorageEntry.draftKey = event.target.value;
+    });
+
+    keyField.append(keyLabel, keyInput);
+
+    const valueField = document.createElement("label");
+    valueField.className = "local-storage-editor__field";
+
+    const valueLabel = document.createElement("span");
+    valueLabel.className = "local-storage-editor__label";
+    valueLabel.textContent = "Value";
+
+    const valueInput = document.createElement("textarea");
+    valueInput.className = "local-storage-editor__textarea";
+    valueInput.rows = 4;
+    valueInput.value = editingLocalStorageEntry ? editingLocalStorageEntry.draftValue : "";
+    valueInput.disabled = Boolean(busyState);
+    valueInput.addEventListener("input", (event) => {
+      if (!editingLocalStorageEntry) {
+        return;
+      }
+
+      editingLocalStorageEntry.draftValue = event.target.value;
+    });
+
+    valueField.append(valueLabel, valueInput);
+
+    const actions = document.createElement("div");
+    actions.className = "local-storage-editor__actions";
+
+    const saveButton = createActionButton({
+      label: "Save",
+      busyLabel: "Saving...",
+      variantClass: "button--secondary button--compact",
+      isBusy: isProfileActionBusy("edit-local-storage", profileId),
+      onClick: async () => {
+        if (!editingLocalStorageEntry) {
+          return;
+        }
+
+        await handleProfileAction({
+          profile: { id: profileId, profileName: "localStorage entry" },
+          action: "edit-local-storage",
+          beforeMessage: "Saving localStorage entry...",
+          successMessage: "LocalStorage entry updated",
+          failureMessage: "Failed to update localStorage entry.",
+          run: () => saveLocalStorageEntry(profileId)
+        });
+      }
+    });
+    saveButton.disabled = Boolean(busyState);
+
+    const cancelButton = createActionButton({
+      label: "Cancel",
+      busyLabel: "Cancel",
+      variantClass: "button--ghost button--compact",
+      isBusy: false,
+      onClick: () => cancelEditingLocalStorageEntry()
+    });
+    cancelButton.disabled = Boolean(busyState);
+
+    actions.append(saveButton, cancelButton);
+    editor.append(keyField, valueField, actions);
+
+    window.setTimeout(() => {
+      keyInput.focus();
+      keyInput.setSelectionRange(keyInput.value.length, keyInput.value.length);
+    }, 0);
+
+    return editor;
+  }
+
   function renderCookiesSection(profile) {
     const section = document.createElement("section");
     section.className = "profile-details__section";
@@ -1154,13 +1325,50 @@ document.addEventListener("DOMContentLoaded", () => {
       const item = document.createElement("article");
       item.className = "cookie-item";
 
-      item.append(
-        createCookieDetailRow("Key", entryKey || "(empty key)"),
-        createExpandableValueRow({
-          expansionKey: `${profile.id}:localStorage:${entryIndex}:${entryKey}`,
-          value: entryValue
-        })
+      const keyRow = document.createElement("div");
+      keyRow.className = "cookie-item__row";
+
+      const keyLabel = document.createElement("span");
+      keyLabel.className = "cookie-item__key";
+      keyLabel.textContent = "Key";
+
+      const keyContent = document.createElement("div");
+      keyContent.className = "local-storage-entry__key-row";
+
+      const keyValue = document.createElement("span");
+      keyValue.className = "cookie-item__value";
+      keyValue.textContent = entryKey || "(empty key)";
+
+      const editButton = createActionButton({
+        label: "Edit entry",
+        busyLabel: "Edit entry",
+        variantClass: "button--icon button--ghost button--icon-small",
+        isBusy: false,
+        iconName: "edit",
+        title: "Edit localStorage entry",
+        onClick: () => startEditingLocalStorageEntry(profile.id, entryKey, entryValue)
+      });
+      editButton.disabled = Boolean(
+        busyState ||
+          (editingLocalStorageEntry &&
+            !isEditingLocalStorageEntry(profile.id, entryKey))
       );
+
+      keyContent.append(keyValue, editButton);
+      keyRow.append(keyLabel, keyContent);
+
+      item.appendChild(keyRow);
+
+      if (isEditingLocalStorageEntry(profile.id, entryKey)) {
+        item.appendChild(createLocalStorageEditor(profile.id));
+      } else {
+        item.appendChild(
+          createExpandableValueRow({
+            expansionKey: `${profile.id}:localStorage:${entryIndex}:${entryKey}`,
+            value: entryValue
+          })
+        );
+      }
 
       list.appendChild(item);
     });

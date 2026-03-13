@@ -328,6 +328,20 @@ body {
   border-radius: 10px;
 }
 
+.button--icon-small {
+  flex-basis: 32px;
+  width: 32px;
+  min-width: 32px;
+  min-height: 32px;
+}
+
+.button--compact {
+  width: auto;
+  min-height: 32px;
+  padding: 8px 12px;
+  font-size: 12px;
+}
+
 .button__icon {
   width: 16px;
   height: 16px;
@@ -535,6 +549,71 @@ body {
 
 .cookie-item__toggle:hover {
   text-decoration: underline;
+}
+
+.local-storage-entry__key-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.local-storage-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 12px;
+  background: #f6f9fb;
+}
+
+.local-storage-editor__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.local-storage-editor__label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.local-storage-editor__input,
+.local-storage-editor__textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--input-border);
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 9px 10px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.local-storage-editor__textarea {
+  min-height: 88px;
+  resize: vertical;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  line-height: 1.45;
+}
+
+.local-storage-editor__input:focus,
+.local-storage-editor__textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.local-storage-editor__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .status-message {
