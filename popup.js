@@ -19,6 +19,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let currentDomainErrorMessage = "";
   let currentView = "list";
   let selectedProfileId = "";
+  let expandedCookieValues = new Set();
 
   function showStatus(message, type = "info") {
     window.clearTimeout(statusTimeoutId);
@@ -58,6 +59,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function setCurrentView(view, profileId = "") {
     currentView = view;
     selectedProfileId = profileId;
+    expandedCookieValues = new Set();
     renderProfiles(allProfiles);
   }
 
@@ -952,6 +954,152 @@ document.addEventListener("DOMContentLoaded", () => {
     return detailsItem;
   }
 
+  function formatCookieExpiration(expirationDate) {
+    if (typeof expirationDate !== "number" || Number.isNaN(expirationDate)) {
+      return "Session cookie";
+    }
+
+    return formatSavedAt(new Date(expirationDate * 1000).toISOString());
+  }
+
+  function formatCookieSameSite(sameSite) {
+    if (typeof sameSite !== "string" || !sameSite) {
+      return "Not set";
+    }
+
+    return sameSite;
+  }
+
+  function createCookieDetailRow(label, value, extraClassName = "") {
+    const row = document.createElement("div");
+    row.className = "cookie-item__row";
+
+    const key = document.createElement("span");
+    key.className = "cookie-item__key";
+    key.textContent = label;
+
+    const content = document.createElement("span");
+    content.className = `cookie-item__value ${extraClassName}`.trim();
+    content.textContent = value;
+
+    row.append(key, content);
+    return row;
+  }
+
+  function createCookieValueRow({ profileId, cookie, cookieIndex }) {
+    const cookieValue = typeof cookie.value === "string" ? cookie.value : "";
+    const expansionKey = `${profileId}:${cookieIndex}:${cookie.name}`;
+    const shouldShowToggle = cookieValue.length > 120 || cookieValue.includes("\n");
+    const isExpanded = expandedCookieValues.has(expansionKey);
+    const row = document.createElement("div");
+    row.className = "cookie-item__row cookie-item__row--stacked";
+
+    const rowHeader = document.createElement("div");
+    rowHeader.className = "cookie-item__row-header";
+
+    const key = document.createElement("span");
+    key.className = "cookie-item__key";
+    key.textContent = "Value";
+    rowHeader.appendChild(key);
+
+    if (shouldShowToggle) {
+      const toggleButton = document.createElement("button");
+      toggleButton.type = "button";
+      toggleButton.className = "cookie-item__toggle";
+      toggleButton.textContent = isExpanded ? "Collapse" : "Expand";
+      toggleButton.setAttribute("aria-expanded", String(isExpanded));
+      toggleButton.addEventListener("click", () => {
+        if (expandedCookieValues.has(expansionKey)) {
+          expandedCookieValues.delete(expansionKey);
+        } else {
+          expandedCookieValues.add(expansionKey);
+        }
+
+        renderProfiles(allProfiles);
+      });
+      rowHeader.appendChild(toggleButton);
+    }
+
+    const content = document.createElement("pre");
+    content.className = `cookie-item__value cookie-item__value--block${
+      isExpanded ? " is-expanded" : ""
+    }`;
+    content.textContent = cookieValue || "(empty)";
+
+    row.append(rowHeader, content);
+    return row;
+  }
+
+  function renderCookiesSection(profile) {
+    const section = document.createElement("section");
+    section.className = "profile-details__section";
+
+    const header = document.createElement("div");
+    header.className = "profile-details__section-header";
+
+    const title = document.createElement("h4");
+    title.className = "profile-details__section-title";
+    title.textContent = "Cookies";
+
+    const count = document.createElement("span");
+    count.className = "profile-details__section-count";
+    count.textContent = `${getProfileCookieCount(profile)} saved`;
+
+    header.append(title, count);
+    section.appendChild(header);
+
+    const cookies = Array.isArray(profile.cookies) ? profile.cookies : [];
+
+    if (!cookies.length) {
+      const emptyState = document.createElement("div");
+      emptyState.className = "cookie-empty-state";
+      emptyState.textContent = "No cookies were saved for this profile.";
+      section.appendChild(emptyState);
+      return section;
+    }
+
+    const list = document.createElement("div");
+    list.className = "cookie-list";
+
+    cookies.forEach((cookie, cookieIndex) => {
+      const item = document.createElement("article");
+      item.className = "cookie-item";
+
+      const itemTitle = document.createElement("h5");
+      itemTitle.className = "cookie-item__title";
+      itemTitle.textContent = cookie.name || "Unnamed cookie";
+
+      const itemMeta = document.createElement("div");
+      itemMeta.className = "cookie-item__meta";
+
+      const secureBadge = document.createElement("span");
+      secureBadge.className = "cookie-item__badge";
+      secureBadge.textContent = cookie.secure ? "Secure" : "Not secure";
+
+      const httpOnlyBadge = document.createElement("span");
+      httpOnlyBadge.className = "cookie-item__badge";
+      httpOnlyBadge.textContent = cookie.httpOnly ? "HttpOnly" : "Readable";
+
+      itemMeta.append(secureBadge, httpOnlyBadge);
+      item.append(itemTitle, itemMeta);
+
+      item.append(
+        createCookieValueRow({ profileId: profile.id, cookie, cookieIndex }),
+        createCookieDetailRow("Domain", cookie.domain || profile.domain || "Unknown"),
+        createCookieDetailRow("Path", cookie.path || "/"),
+        createCookieDetailRow("Secure", cookie.secure ? "Yes" : "No"),
+        createCookieDetailRow("HttpOnly", cookie.httpOnly ? "Yes" : "No"),
+        createCookieDetailRow("SameSite", formatCookieSameSite(cookie.sameSite)),
+        createCookieDetailRow("Expires", formatCookieExpiration(cookie.expirationDate))
+      );
+
+      list.appendChild(item);
+    });
+
+    section.appendChild(list);
+    return section;
+  }
+
   function renderProfileDetailsView(profile) {
     const detailsView = document.createElement("article");
     detailsView.className = "profile-details";
@@ -983,7 +1131,7 @@ document.addEventListener("DOMContentLoaded", () => {
       createDetailsItem("localStorage", String(getProfileLocalStorageCount(profile)))
     );
 
-    detailsView.append(backButton, title, subtitle, grid);
+    detailsView.append(backButton, title, subtitle, grid, renderCookiesSection(profile));
     profilesList.appendChild(detailsView);
   }
 
