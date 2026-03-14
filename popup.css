@@ -630,6 +630,13 @@ body {
   word-break: break-word;
 }
 
+.cookie-item__highlight {
+  padding: 0 2px;
+  border-radius: 4px;
+  background: #fff1a8;
+  color: inherit;
+}
+
 .cookie-item__value--block {
   margin: 0;
   padding: 8px 10px;
