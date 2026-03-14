@@ -21,6 +21,8 @@ document.addEventListener("DOMContentLoaded", () => {
   let selectedProfileId = "";
   let expandedValueRows = new Set();
   let inspectorSectionStates = new Map();
+  let inspectorSearchStates = new Map();
+  let pendingSearchFocusKey = "";
   let editingLocalStorageEntry = null;
   let editingCookieEntry = null;
 
@@ -64,6 +66,8 @@ document.addEventListener("DOMContentLoaded", () => {
     selectedProfileId = profileId;
     expandedValueRows = new Set();
     inspectorSectionStates = new Map();
+    inspectorSearchStates = new Map();
+    pendingSearchFocusKey = "";
     editingLocalStorageEntry = null;
     editingCookieEntry = null;
     renderProfiles(allProfiles);
@@ -1121,6 +1125,11 @@ document.addEventListener("DOMContentLoaded", () => {
         "d",
         "M12 20h9 M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5Z"
       );
+    } else if (iconName === "search") {
+      path.setAttribute(
+        "d",
+        "m21 21-4.35-4.35 M10.75 18a7.25 7.25 0 1 1 0-14.5 7.25 7.25 0 0 1 0 14.5Z"
+      );
     } else {
       path.setAttribute(
         "d",
@@ -1257,6 +1266,10 @@ document.addEventListener("DOMContentLoaded", () => {
     return `${profileId}:section:${sectionName}`;
   }
 
+  function getInspectorSearchKey(profileId, sectionName) {
+    return `${profileId}:search:${sectionName}`;
+  }
+
   function isInspectorSectionCollapsed(profileId, sectionName, defaultCollapsed = false) {
     const sectionKey = getInspectorSectionKey(profileId, sectionName);
 
@@ -1273,6 +1286,42 @@ document.addEventListener("DOMContentLoaded", () => {
     inspectorSectionStates.set(sectionKey, !currentState);
 
     renderProfiles(allProfiles);
+  }
+
+  function getInspectorSearchState(profileId, sectionName) {
+    const sectionKey = getInspectorSearchKey(profileId, sectionName);
+
+    if (!inspectorSearchStates.has(sectionKey)) {
+      inspectorSearchStates.set(sectionKey, {
+        isVisible: false,
+        query: ""
+      });
+    }
+
+    return inspectorSearchStates.get(sectionKey);
+  }
+
+  function toggleInspectorSearch(profileId, sectionName) {
+    const sectionKey = getInspectorSearchKey(profileId, sectionName);
+    const currentState = getInspectorSearchState(profileId, sectionName);
+    const nextState = {
+      ...currentState,
+      isVisible: !currentState.isVisible
+    };
+
+    inspectorSearchStates.set(sectionKey, nextState);
+    pendingSearchFocusKey = nextState.isVisible ? sectionKey : "";
+    renderProfiles(allProfiles);
+  }
+
+  function updateInspectorSearchQuery(profileId, sectionName, query) {
+    const sectionKey = getInspectorSearchKey(profileId, sectionName);
+    const currentState = getInspectorSearchState(profileId, sectionName);
+
+    inspectorSearchStates.set(sectionKey, {
+      ...currentState,
+      query
+    });
   }
 
   function createSectionEmptyState({ title, description }) {
@@ -1299,6 +1348,7 @@ document.addEventListener("DOMContentLoaded", () => {
     countText = "",
     isCollapsible = false,
     defaultCollapsed = false,
+    showSearch = false,
     content
   }) {
     const section = document.createElement("section");
@@ -1327,6 +1377,53 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const controls = document.createElement("div");
     controls.className = "inspector-section__controls";
+
+    if (showSearch) {
+      const searchState = getInspectorSearchState(profileId, sectionName);
+      const searchControl = document.createElement("div");
+      searchControl.className = `inspector-section__search${
+        searchState.isVisible ? " is-visible" : ""
+      }`;
+
+      const searchButton = createActionButton({
+        label: searchState.isVisible ? "Hide search" : "Show search",
+        busyLabel: searchState.isVisible ? "Hide search" : "Show search",
+        variantClass: "button--icon button--ghost button--icon-small inspector-section__search-button",
+        isBusy: false,
+        iconName: "search",
+        title: searchState.isVisible ? "Hide search" : "Show search",
+        onClick: () => toggleInspectorSearch(profileId, sectionName)
+      });
+      searchButton.disabled = false;
+      searchControl.appendChild(searchButton);
+
+      if (searchState.isVisible) {
+        const searchInput = document.createElement("input");
+        searchInput.type = "text";
+        searchInput.className = "inspector-section__search-input";
+        searchInput.placeholder = "Search...";
+        searchInput.value = searchState.query;
+        searchInput.autocomplete = "off";
+        searchInput.setAttribute("aria-label", `${title} search`);
+        searchInput.addEventListener("input", (event) => {
+          updateInspectorSearchQuery(profileId, sectionName, event.target.value);
+        });
+        searchControl.appendChild(searchInput);
+
+        if (pendingSearchFocusKey === getInspectorSearchKey(profileId, sectionName)) {
+          window.setTimeout(() => {
+            searchInput.focus();
+            searchInput.setSelectionRange(
+              searchInput.value.length,
+              searchInput.value.length
+            );
+          }, 0);
+          pendingSearchFocusKey = "";
+        }
+      }
+
+      controls.appendChild(searchControl);
+    }
 
     if (countText) {
       const count = document.createElement("span");
@@ -1709,7 +1806,8 @@ document.addEventListener("DOMContentLoaded", () => {
         content: createSectionEmptyState({
           title: "No cookies saved",
           description: "Save a session after signing in to capture cookies for this site."
-        })
+        }),
+        showSearch: true
       });
     }
 
@@ -1785,6 +1883,7 @@ document.addEventListener("DOMContentLoaded", () => {
       countText: `${cookies.length} saved`,
       isCollapsible: cookies.length > 4,
       defaultCollapsed: cookies.length > 8,
+      showSearch: true,
       content: list
     });
   }
@@ -1802,7 +1901,8 @@ document.addEventListener("DOMContentLoaded", () => {
         content: createSectionEmptyState({
           title: "No localStorage saved",
           description: "This profile did not capture any localStorage entries for the current origin."
-        })
+        }),
+        showSearch: true
       });
     }
 
@@ -1872,6 +1972,7 @@ document.addEventListener("DOMContentLoaded", () => {
       countText: `${entries.length} saved`,
       isCollapsible: entries.length > 4,
       defaultCollapsed: entries.length > 8,
+      showSearch: true,
       content: list
     });
   }
