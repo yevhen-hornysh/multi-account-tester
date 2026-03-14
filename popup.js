@@ -1322,6 +1322,9 @@ document.addEventListener("DOMContentLoaded", () => {
       ...currentState,
       query
     });
+
+    pendingSearchFocusKey = sectionKey;
+    renderProfiles(allProfiles);
   }
 
   function createSectionEmptyState({ title, description }) {
@@ -1481,6 +1484,33 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     return sameSite;
+  }
+
+  function getCookieSearchableText(cookie, profileDomain = "") {
+    return [
+      cookie && typeof cookie.name === "string" ? cookie.name : "",
+      cookie && typeof cookie.value === "string" ? cookie.value : "",
+      cookie && typeof cookie.domain === "string" ? cookie.domain : profileDomain,
+      cookie && typeof cookie.path === "string" ? cookie.path : "/",
+      formatCookieSameSite(cookie ? cookie.sameSite : ""),
+      formatCookieExpiration(cookie ? cookie.expirationDate : undefined)
+    ]
+      .join(" ")
+      .toLowerCase();
+  }
+
+  function filterCookiesByQuery(cookies, query, profileDomain = "") {
+    const normalizedQuery = typeof query === "string" ? query.trim().toLowerCase() : "";
+
+    if (!normalizedQuery) {
+      return cookies.map((cookie, cookieIndex) => ({ cookie, cookieIndex }));
+    }
+
+    return cookies
+      .map((cookie, cookieIndex) => ({ cookie, cookieIndex }))
+      .filter(({ cookie }) =>
+        getCookieSearchableText(cookie, profileDomain).includes(normalizedQuery)
+      );
   }
 
   function createCookieDetailRow(label, value, extraClassName = "") {
@@ -1795,6 +1825,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function renderCookiesSection(profile) {
     const cookies = getProfileCookies(profile);
+    const searchQuery = getInspectorSearchState(profile.id, "cookies").query;
+    const filteredCookies = filterCookiesByQuery(cookies, searchQuery, profile.domain || "");
 
     if (!cookies.length) {
       return createInspectorSection({
@@ -1811,10 +1843,25 @@ document.addEventListener("DOMContentLoaded", () => {
       });
     }
 
+    if (!filteredCookies.length) {
+      return createInspectorSection({
+        profileId: profile.id,
+        sectionName: "cookies",
+        title: "Cookies",
+        description: "Saved authentication and preference cookies for this profile.",
+        countText: `0 of ${cookies.length} saved`,
+        content: createSectionEmptyState({
+          title: "No cookies match your search",
+          description: "Try a different value or clear the search field."
+        }),
+        showSearch: true
+      });
+    }
+
     const list = document.createElement("div");
     list.className = "inspector-list inspector-list--scrollable";
 
-    cookies.forEach((cookie, cookieIndex) => {
+    filteredCookies.forEach(({ cookie, cookieIndex }) => {
       const item = document.createElement("article");
       item.className = `cookie-item${
         isEditingCookieEntry(profile.id, cookieIndex) ? " cookie-item--editing" : ""
@@ -1880,9 +1927,11 @@ document.addEventListener("DOMContentLoaded", () => {
       sectionName: "cookies",
       title: "Cookies",
       description: "Saved authentication and preference cookies for this profile.",
-      countText: `${cookies.length} saved`,
-      isCollapsible: cookies.length > 4,
-      defaultCollapsed: cookies.length > 8,
+      countText: searchQuery.trim()
+        ? `${filteredCookies.length} of ${cookies.length} saved`
+        : `${cookies.length} saved`,
+      isCollapsible: filteredCookies.length > 4,
+      defaultCollapsed: filteredCookies.length > 8,
       showSearch: true,
       content: list
     });
