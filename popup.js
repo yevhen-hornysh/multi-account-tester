@@ -1351,6 +1351,31 @@ document.addEventListener("DOMContentLoaded", () => {
     renderProfiles(allProfiles);
   }
 
+  function setSearchClearButtonVisibility(searchInput, clearButton) {
+    if (!(clearButton instanceof HTMLButtonElement)) {
+      return;
+    }
+
+    clearButton.hidden = !(searchInput instanceof HTMLInputElement) || searchInput.value.length === 0;
+  }
+
+  function clearInspectorSearchInput(profileId, sectionName, searchInput, clearButton) {
+    if (!(searchInput instanceof HTMLInputElement)) {
+      updateInspectorSearchQuery(profileId, sectionName, "");
+      return;
+    }
+
+    searchInput.value = "";
+    setSearchClearButtonVisibility(searchInput, clearButton);
+    updateInspectorSearchQuery(profileId, sectionName, "");
+
+    try {
+      searchInput.focus({ preventScroll: true });
+    } catch (error) {
+      searchInput.focus();
+    }
+  }
+
   function createSectionEmptyState({ title, description }) {
     const emptyState = document.createElement("div");
     emptyState.className = "inspector-empty-state";
@@ -1427,6 +1452,9 @@ document.addEventListener("DOMContentLoaded", () => {
       searchControl.appendChild(searchButton);
 
       if (searchState.isVisible) {
+        const searchField = document.createElement("div");
+        searchField.className = "inspector-section__search-field";
+
         const searchInput = document.createElement("input");
         searchInput.type = "text";
         searchInput.className = "inspector-section__search-input";
@@ -1434,10 +1462,42 @@ document.addEventListener("DOMContentLoaded", () => {
         searchInput.value = searchState.query;
         searchInput.autocomplete = "off";
         searchInput.setAttribute("aria-label", `${title} search`);
+        searchInput.setAttribute("spellcheck", "false");
+
+        const clearButton = document.createElement("button");
+        clearButton.type = "button";
+        clearButton.className = "inspector-section__search-clear";
+        clearButton.setAttribute("aria-label", `Clear ${title} search`);
+        clearButton.title = "Clear search";
+        clearButton.textContent = "×";
+        clearButton.addEventListener("mousedown", (event) => {
+          event.preventDefault();
+        });
+        clearButton.addEventListener("click", () => {
+          clearInspectorSearchInput(profileId, sectionName, searchInput, clearButton);
+        });
+
         searchInput.addEventListener("input", (event) => {
+          setSearchClearButtonVisibility(searchInput, clearButton);
           updateInspectorSearchQuery(profileId, sectionName, event.target.value);
         });
-        searchControl.appendChild(searchInput);
+        searchInput.addEventListener("keydown", (event) => {
+          if (event.key !== "Escape") {
+            return;
+          }
+
+          if (!searchInput.value.length) {
+            return;
+          }
+
+          event.preventDefault();
+          event.stopPropagation();
+          clearInspectorSearchInput(profileId, sectionName, searchInput, clearButton);
+        });
+
+        setSearchClearButtonVisibility(searchInput, clearButton);
+        searchField.append(searchInput, clearButton);
+        searchControl.appendChild(searchField);
 
         if (pendingSearchFocusKey === getInspectorSearchKey(profileId, sectionName)) {
           window.setTimeout(() => {
