@@ -1334,6 +1334,15 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
+    if (
+      sectionName === "local-storage" &&
+      currentView === "details" &&
+      selectedProfileId === profileId
+    ) {
+      updateRenderedLocalStorageSection(profileId);
+      return;
+    }
+
     pendingProfilesListScrollTop = profilesList.scrollTop;
     pendingDocumentScrollTop = document.scrollingElement
       ? document.scrollingElement.scrollTop
@@ -1635,6 +1644,39 @@ document.addEventListener("DOMContentLoaded", () => {
 
         return firstResult.cookieIndex - secondResult.cookieIndex;
       });
+  }
+
+  function filterLocalStorageEntriesByQuery(entries, query) {
+    const normalizedQuery = normalizeInspectorSearchQuery(query);
+
+    if (!normalizedQuery) {
+      return entries.map(([entryKey, entryValue], entryIndex) => ({
+        entryKey,
+        entryValue,
+        entryIndex
+      }));
+    }
+
+    return entries
+      .map(([entryKey, entryValue], entryIndex) => {
+        const normalizedKey = typeof entryKey === "string" ? entryKey.toLowerCase() : "";
+        const normalizedValue =
+          typeof entryValue === "string"
+            ? entryValue.toLowerCase()
+            : entryValue === null
+              ? "null"
+              : "";
+
+        return {
+          entryKey,
+          entryValue,
+          entryIndex,
+          matches:
+            normalizedKey.includes(normalizedQuery) ||
+            normalizedValue.includes(normalizedQuery)
+        };
+      })
+      .filter(({ matches }) => matches);
   }
 
   function buildCookiesSectionContent(profile) {
@@ -2117,27 +2159,55 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function renderLocalStorageSection(profile) {
+    const { countText, isCollapsible, defaultCollapsed, content } =
+      buildLocalStorageSectionContent(profile);
+
+    return createInspectorSection({
+      profileId: profile.id,
+      sectionName: "local-storage",
+      title: "LocalStorage",
+      description: "Saved per-origin values captured from the active tab.",
+      countText,
+      isCollapsible,
+      defaultCollapsed,
+      showSearch: true,
+      content
+    });
+  }
+
+  function buildLocalStorageSectionContent(profile) {
     const entries = getProfileLocalStorageEntries(profile);
+    const searchQuery = getInspectorSearchState(profile.id, "local-storage").query;
+    const filteredEntries = filterLocalStorageEntriesByQuery(entries, searchQuery);
 
     if (!entries.length) {
-      return createInspectorSection({
-        profileId: profile.id,
-        sectionName: "local-storage",
-        title: "LocalStorage",
-        description: "Saved per-origin values captured from the active tab.",
+      return {
         countText: "0 saved",
+        isCollapsible: false,
+        defaultCollapsed: false,
         content: createSectionEmptyState({
           title: "No localStorage saved",
           description: "This profile did not capture any localStorage entries for the current origin."
-        }),
-        showSearch: true
-      });
+        })
+      };
+    }
+
+    if (!filteredEntries.length) {
+      return {
+        countText: `0 of ${entries.length} saved`,
+        isCollapsible: false,
+        defaultCollapsed: false,
+        content: createSectionEmptyState({
+          title: "No localStorage entries match your search",
+          description: "Try a different value or clear the search field."
+        })
+      };
     }
 
     const list = document.createElement("div");
     list.className = "inspector-list inspector-list--scrollable";
 
-    entries.forEach(([entryKey, entryValue], entryIndex) => {
+    filteredEntries.forEach(({ entryKey, entryValue, entryIndex }) => {
       const item = document.createElement("article");
       item.className = `cookie-item${
         isEditingLocalStorageEntry(profile.id, entryKey) ? " cookie-item--editing" : ""
@@ -2155,7 +2225,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
       const keyValue = document.createElement("span");
       keyValue.className = "cookie-item__value";
-      keyValue.textContent = entryKey || "(empty key)";
+      keyValue.appendChild(
+        createHighlightedTextFragment(entryKey || "(empty key)", searchQuery)
+      );
 
       const editButton = createActionButton({
         label: "Edit entry",
@@ -2184,7 +2256,8 @@ document.addEventListener("DOMContentLoaded", () => {
         item.appendChild(
           createExpandableValueRow({
             expansionKey: `${profile.id}:localStorage:${entryIndex}:${entryKey}`,
-            value: entryValue
+            value: entryValue,
+            highlightQuery: searchQuery
           })
         );
       }
@@ -2192,17 +2265,59 @@ document.addEventListener("DOMContentLoaded", () => {
       list.appendChild(item);
     });
 
-    return createInspectorSection({
-      profileId: profile.id,
-      sectionName: "local-storage",
-      title: "LocalStorage",
-      description: "Saved per-origin values captured from the active tab.",
-      countText: `${entries.length} saved`,
-      isCollapsible: entries.length > 4,
-      defaultCollapsed: entries.length > 8,
-      showSearch: true,
+    return {
+      countText: searchQuery.trim()
+        ? `${filteredEntries.length} of ${entries.length} saved`
+        : `${entries.length} saved`,
+      isCollapsible: filteredEntries.length > 4,
+      defaultCollapsed: filteredEntries.length > 8,
       content: list
-    });
+    };
+  }
+
+  function updateRenderedLocalStorageSection(profileId) {
+    const profile = getProfileById(profileId);
+
+    if (!profile) {
+      return;
+    }
+
+    const section = profilesList.querySelector(
+      `.inspector-section[data-profile-id="${profileId}"][data-section-name="local-storage"]`
+    );
+
+    if (!section) {
+      return;
+    }
+
+    const body = section.querySelector('[data-role="section-body"]');
+    const count = section.querySelector('[data-role="section-count"]');
+    const toggleButton = section.querySelector('[data-role="section-toggle"]');
+    const { content, countText, isCollapsible, defaultCollapsed } =
+      buildLocalStorageSectionContent(profile);
+    const isCollapsed = isCollapsible
+      ? isInspectorSectionCollapsed(profileId, "local-storage", defaultCollapsed)
+      : false;
+
+    if (count) {
+      count.textContent = countText;
+    }
+
+    if (body) {
+      body.textContent = "";
+      body.appendChild(content);
+      body.hidden = isCollapsed;
+    }
+
+    if (toggleButton) {
+      if (isCollapsible) {
+        toggleButton.hidden = false;
+        toggleButton.textContent = isCollapsed ? "Expand" : "Collapse";
+        toggleButton.setAttribute("aria-expanded", String(!isCollapsed));
+      } else {
+        toggleButton.hidden = true;
+      }
+    }
   }
 
   function renderProfileDetailsView(profile) {
