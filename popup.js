@@ -1510,31 +1510,131 @@ document.addEventListener("DOMContentLoaded", () => {
     return sameSite;
   }
 
-  function getCookieSearchableText(cookie, profileDomain = "") {
-    return [
-      cookie && typeof cookie.name === "string" ? cookie.name : "",
-      cookie && typeof cookie.value === "string" ? cookie.value : "",
-      cookie && typeof cookie.domain === "string" ? cookie.domain : profileDomain,
-      cookie && typeof cookie.path === "string" ? cookie.path : "/",
-      formatCookieSameSite(cookie ? cookie.sameSite : ""),
-      formatCookieExpiration(cookie ? cookie.expirationDate : undefined)
-    ]
-      .join(" ")
-      .toLowerCase();
+  function normalizeInspectorSearchQuery(query) {
+    return typeof query === "string" ? query.trim().toLowerCase() : "";
+  }
+
+  function getCookieSearchFields(cookie, profileDomain = "") {
+    return {
+      name: cookie && typeof cookie.name === "string" ? cookie.name : "",
+      value: cookie && typeof cookie.value === "string" ? cookie.value : "",
+      domain: cookie && typeof cookie.domain === "string" ? cookie.domain : profileDomain,
+      path: cookie && typeof cookie.path === "string" ? cookie.path : "/",
+      sameSite: formatCookieSameSite(cookie ? cookie.sameSite : "")
+    };
+  }
+
+  function getCookieMatchScore(cookie, normalizedQuery, profileDomain = "") {
+    if (!normalizedQuery) {
+      return null;
+    }
+
+    const searchFields = Object.values(getCookieSearchFields(cookie, profileDomain));
+    let bestScore = null;
+
+    searchFields.forEach((fieldValue, fieldIndex) => {
+      const normalizedFieldValue =
+        typeof fieldValue === "string" ? fieldValue.toLowerCase() : String(fieldValue).toLowerCase();
+      const matchIndex = normalizedFieldValue.indexOf(normalizedQuery);
+
+      if (matchIndex === -1) {
+        return;
+      }
+
+      let priority = 3;
+
+      if (normalizedFieldValue === normalizedQuery) {
+        priority = 1;
+      } else if (matchIndex === 0) {
+        priority = 2;
+      }
+
+      const nextScore = {
+        priority,
+        matchIndex,
+        fieldIndex
+      };
+
+      if (
+        !bestScore ||
+        nextScore.priority < bestScore.priority ||
+        (nextScore.priority === bestScore.priority && nextScore.matchIndex < bestScore.matchIndex) ||
+        (nextScore.priority === bestScore.priority &&
+          nextScore.matchIndex === bestScore.matchIndex &&
+          nextScore.fieldIndex < bestScore.fieldIndex)
+      ) {
+        bestScore = nextScore;
+      }
+    });
+
+    return bestScore;
+  }
+
+  function createHighlightedTextFragment(value, query) {
+    const fragment = document.createDocumentFragment();
+    const textValue =
+      typeof value === "string" ? value : value === null || typeof value === "undefined" ? "" : String(value);
+    const normalizedQuery = normalizeInspectorSearchQuery(query);
+
+    if (!normalizedQuery || !textValue) {
+      fragment.appendChild(document.createTextNode(textValue));
+      return fragment;
+    }
+
+    const normalizedValue = textValue.toLowerCase();
+    let startIndex = 0;
+    let matchIndex = normalizedValue.indexOf(normalizedQuery, startIndex);
+
+    while (matchIndex !== -1) {
+      if (matchIndex > startIndex) {
+        fragment.appendChild(document.createTextNode(textValue.slice(startIndex, matchIndex)));
+      }
+
+      const highlight = document.createElement("mark");
+      highlight.className = "cookie-item__highlight";
+      highlight.textContent = textValue.slice(matchIndex, matchIndex + normalizedQuery.length);
+      fragment.appendChild(highlight);
+
+      startIndex = matchIndex + normalizedQuery.length;
+      matchIndex = normalizedValue.indexOf(normalizedQuery, startIndex);
+    }
+
+    if (startIndex < textValue.length) {
+      fragment.appendChild(document.createTextNode(textValue.slice(startIndex)));
+    }
+
+    return fragment;
   }
 
   function filterCookiesByQuery(cookies, query, profileDomain = "") {
-    const normalizedQuery = typeof query === "string" ? query.trim().toLowerCase() : "";
+    const normalizedQuery = normalizeInspectorSearchQuery(query);
 
     if (!normalizedQuery) {
       return cookies.map((cookie, cookieIndex) => ({ cookie, cookieIndex }));
     }
 
     return cookies
-      .map((cookie, cookieIndex) => ({ cookie, cookieIndex }))
-      .filter(({ cookie }) =>
-        getCookieSearchableText(cookie, profileDomain).includes(normalizedQuery)
-      );
+      .map((cookie, cookieIndex) => ({
+        cookie,
+        cookieIndex,
+        matchScore: getCookieMatchScore(cookie, normalizedQuery, profileDomain)
+      }))
+      .filter(({ matchScore }) => Boolean(matchScore))
+      .sort((firstResult, secondResult) => {
+        if (firstResult.matchScore.priority !== secondResult.matchScore.priority) {
+          return firstResult.matchScore.priority - secondResult.matchScore.priority;
+        }
+
+        if (firstResult.matchScore.matchIndex !== secondResult.matchScore.matchIndex) {
+          return firstResult.matchScore.matchIndex - secondResult.matchScore.matchIndex;
+        }
+
+        if (firstResult.matchScore.fieldIndex !== secondResult.matchScore.fieldIndex) {
+          return firstResult.matchScore.fieldIndex - secondResult.matchScore.fieldIndex;
+        }
+
+        return firstResult.cookieIndex - secondResult.cookieIndex;
+      });
   }
 
   function buildCookiesSectionContent(profile) {
@@ -1580,7 +1680,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
       const itemTitle = document.createElement("h5");
       itemTitle.className = "cookie-item__title";
-      itemTitle.textContent = cookie.name || "Unnamed cookie";
+      itemTitle.appendChild(createHighlightedTextFragment(cookie.name || "Unnamed cookie", searchQuery));
 
       const editButton = createActionButton({
         label: "Edit cookie",
@@ -1617,12 +1717,12 @@ document.addEventListener("DOMContentLoaded", () => {
         item.appendChild(createCookieEditor(profile.id));
       } else {
         item.append(
-          createCookieValueRow({ profileId: profile.id, cookie, cookieIndex }),
-          createCookieDetailRow("Domain", cookie.domain || profile.domain || "Unknown"),
-          createCookieDetailRow("Path", cookie.path || "/"),
+          createCookieValueRow({ profileId: profile.id, cookie, cookieIndex, searchQuery }),
+          createCookieDetailRow("Domain", cookie.domain || profile.domain || "Unknown", "", searchQuery),
+          createCookieDetailRow("Path", cookie.path || "/", "", searchQuery),
           createCookieDetailRow("Secure", cookie.secure ? "Yes" : "No"),
           createCookieDetailRow("HttpOnly", cookie.httpOnly ? "Yes" : "No"),
-          createCookieDetailRow("SameSite", formatCookieSameSite(cookie.sameSite)),
+          createCookieDetailRow("SameSite", formatCookieSameSite(cookie.sameSite), "", searchQuery),
           createCookieDetailRow("Expires", formatCookieExpiration(cookie.expirationDate))
         );
       }
@@ -1685,7 +1785,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  function createCookieDetailRow(label, value, extraClassName = "") {
+  function createCookieDetailRow(label, value, extraClassName = "", highlightQuery = "") {
     const row = document.createElement("div");
     row.className = "cookie-item__row";
 
@@ -1695,7 +1795,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const content = document.createElement("span");
     content.className = `cookie-item__value ${extraClassName}`.trim();
-    content.textContent = value;
+    content.appendChild(createHighlightedTextFragment(value, highlightQuery));
 
     row.append(key, content);
     return row;
@@ -1705,7 +1805,8 @@ document.addEventListener("DOMContentLoaded", () => {
     expansionKey,
     label = "Value",
     value,
-    emptyValueLabel = "(empty)"
+    emptyValueLabel = "(empty)",
+    highlightQuery = ""
   }) {
     const normalizedValue = typeof value === "string" ? value : value === null ? "null" : "";
     const shouldShowToggle = normalizedValue.length > 120 || normalizedValue.includes("\n");
@@ -1743,16 +1844,19 @@ document.addEventListener("DOMContentLoaded", () => {
     content.className = `cookie-item__value cookie-item__value--block${
       isExpanded ? " is-expanded" : ""
     }`;
-    content.textContent = normalizedValue || emptyValueLabel;
+    content.appendChild(
+      createHighlightedTextFragment(normalizedValue || emptyValueLabel, highlightQuery)
+    );
 
     row.append(rowHeader, content);
     return row;
   }
 
-  function createCookieValueRow({ profileId, cookie, cookieIndex }) {
+  function createCookieValueRow({ profileId, cookie, cookieIndex, searchQuery = "" }) {
     return createExpandableValueRow({
       expansionKey: `${profileId}:cookie:${cookieIndex}:${cookie.name}`,
-      value: cookie.value
+      value: cookie.value,
+      highlightQuery: searchQuery
     });
   }
 
